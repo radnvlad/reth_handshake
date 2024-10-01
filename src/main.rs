@@ -11,8 +11,7 @@ fn main() {
     }
 }
 
-// fn get_peers() -> Result<(Vec<(secp256k1::PublicKey, String)>)>
-fn get_peers() -> Result<(PublicKey, String), &'static str>
+fn get_peers() -> Result<Vec<(PublicKey, String)>, &'static str>
 {
     const ENODE_PREFIX:&str = "enode://";
 
@@ -38,18 +37,17 @@ fn get_peers() -> Result<(PublicKey, String), &'static str>
                 None => return Err("Invalid ip address"),
             };
 
-        println!("key string is: {:?}", enode_key_string);
+        let mut enode_key_string =   enode_key_string.to_string();
+        enode_key_string.insert_str(0, "04");
 
         let enode_public_key = match PublicKey::from_str(&enode_key_string){
             Ok(e) => e,
             Err(x) => {
-                println!("Key parse err is: {:?}", x);
-
-                return Err("Invalid enode public key ")}
+                error!("Key parse err is: {:?}", x);
+                return Err("Invalid enode public key ")
+            }
         };
         nodes.push((enode_public_key, ip_address.to_string()));
-
     }
-    // nodes
-    Err("Placeholder! ")
+    Ok(nodes)
 }
