@@ -1,6 +1,6 @@
 use log::{error, info, warn, debug};
 use secp256k1::{PublicKey, SecretKey};
-use std::{env, fmt::Error, net::TcpStream};
+use std::{env, fmt::Error, net::TcpStream, str::FromStr};
 
 fn main() {
     env_logger::init();
@@ -15,29 +15,48 @@ fn main() {
 // fn get_peers() -> Result<(Vec<(secp256k1::PublicKey, String)>)>
 fn get_peers() -> Result<(PublicKey, String), &'static str>
 {
-    const ENODE_PREFIX_LENGTH:usize = 8;
-    const PUBLIC_KEY_LENGTH:usize = 128;
-    const KEY_IP_SEPARATOR_LENGTH:usize = 128;
+    const ENODE_PREFIX:&str = "enode://";
 
-    let nodes: Vec<(PublicKey, String)>;
-    let mut enode_public_key: PublicKey;
+    let mut nodes: Vec<(PublicKey, String)> = Vec::new();
+    // let mut enode_public_key: PublicKey;
     // iter = args.next()
     for enode in env::args().skip(1){
 
         debug!("Args are: {:?}", enode);
-        if !enode.starts_with("enode://") {
-            error!("Invalid enode prefix for {:?}", enode);
-            return Err("Invalid enode prefix");
+
+        // if !enode.starts_with(ENODE_PREFIX) {
+        //     error!("Invalid enode prefix for {:?}", enode);
+        //     return Err("Invalid enode prefix");
+        // }
+
+        let (enode_prefix, enode_data) = 
+        match enode.split_once(ENODE_PREFIX) {
+            Some(x) => x,
+            None => return Err("Invalid enode prefix! "),
+        };
+
+        if enode_prefix != "" {
+            return Err("Invalid enode prefix location! ")
         }
-        let id_decoded = hex::decode(&enode[8..136]).map_err(|_| return Err("Invalid enode public key "))?;
-        enode_public_key = match PublicKey::from_slice(id_decoded){
-            Ok(e) => enode_public_key,
+
+        let (enode_key_string, ip_address) = 
+            match enode_data.rsplit_once("@") {
+                Some(x) => x,
+                None => return Err("Invalid ip address"),
+            };
+
+        let enode_public_key = match PublicKey::from_str(&enode_key_string){
+            Ok(e) => e,
             _ => {return Err("Invalid enode public key ")}
-        }
+        };
+        nodes.push((enode_public_key, ip_address.to_string()));
+        // let ip_address = enode
+
         // if !enode.starts_with("enode://") {
         //     error!("Invalid enode prepend for {:?}", enode);
         //     return Err("Invalid enode prepend");
         // }
     }
-    Err("No valid enode")
+    // nodes
+    Err("Placeholder! ")
 }
