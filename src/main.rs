@@ -79,10 +79,10 @@ async fn multi_connection_runner(peers: Vec<(PublicKey, SocketAddr)>  ) {
 async fn establish_session(public_key: PublicKey, socket_address: SocketAddr) {
     match TcpStream::connect(&socket_address).await {
         Ok(mut stream) => {
-            info!("TCP connection established! ");
+            info!("TCP connection to {:?} established! ", socket_address.to_string());
         }
         Err(e) => {
-            info!("TCP connection failed! Error {:?} ", e);
+            info!("TCP connection to {:?} failed! Error {:?} ", socket_address.to_string(), e);
         }
     }
 }
