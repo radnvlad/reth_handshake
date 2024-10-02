@@ -1,13 +1,17 @@
 use log::{error, info, warn, debug};
 use secp256k1::{PublicKey, SecretKey};
-use std::{env, fmt::Error, net::TcpStream, str::FromStr};
+use std::{env, fmt::Error, net::TcpStream, net::IpAddr, str::FromStr};
 
 fn main() {
     env_logger::init();
-    match get_peers() {
-        Ok(peers_eip) => {}
-        Err(e) => error!("Error getting peers! {}",e)
+    let peers_eip = match get_peers() {
+        Ok(x) => {x}
+        Err(e) => {error!("Error getting peers! {}",e); return}
 
+    };
+
+    for (public_key, ip_address) in peers_eip{
+        establish_session(public_key, ip_address);
     }
 }
 
@@ -50,4 +54,13 @@ fn get_peers() -> Result<Vec<(PublicKey, String)>, &'static str>
         nodes.push((enode_public_key, ip_address.to_string()));
     }
     Ok(nodes)
+}
+
+
+fn establish_session(public_key: PublicKey, ip_address: String)
+{
+    match TcpStream::connect(&ip_address) {
+        Ok(mut stream) => {}
+        Err(e) => {}
+    }
 }
