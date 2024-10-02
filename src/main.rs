@@ -25,22 +25,22 @@ fn get_peers() -> Result<Vec<(PublicKey, String)>, &'static str>
 
         debug!("Enode argument is: {:?}", enode);
 
-        let (enode_prefix, enode_data) = 
-        match enode.split_once(ENODE_PREFIX) {
-            Some(x) => x,
-            None => return Err("Invalid enode prefix! "),
-        };
+        let (enode_prefix, enode_data) =  enode
+            .split_once(ENODE_PREFIX).ok_or("Invalid enode prefix! ")?;
 
         if enode_prefix != "" {
             return Err("Invalid enode prefix location! ")
         }
 
-        let (enode_key_string, ip_address_string) = enode_data
+        let (enode_key_string, ip_address) = enode_data
             .rsplit_once("@")
             .ok_or("Invalid ip address")?;
 
-        let ip_address = IpAddr::from_str(ip_address_string)
-            .map_err(|_|" Invalid IP address format! ")?;
+        if false == IpAddr::from_str(ip_address)
+            .map_err(|_|" Invalid IP address format! ")?
+            .is_ipv4() {
+                return Err("IP address is not IPv4! ")
+            }
 
         let mut enode_key_string =   enode_key_string.to_string();
         enode_key_string.insert_str(0, "04");
