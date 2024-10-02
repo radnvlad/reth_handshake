@@ -3,9 +3,11 @@ use secp256k1::{PublicKey, SecretKey};
 use std::{
     env,
     fmt::Error,
-    net::{SocketAddr, TcpStream, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs},
     str::FromStr,
 };
+use tokio::net::TcpStream;
+
 
 fn main() {
     env_logger::init();
@@ -24,6 +26,7 @@ fn main() {
 
 fn get_peers() -> Result<Vec<(PublicKey, SocketAddr)>, &'static str> {
     const ENODE_PREFIX: &str = "enode://";
+    const MAX_ENODES: usize = 10;
 
     let mut nodes: Vec<(PublicKey, SocketAddr)> = Vec::new();
 
@@ -60,17 +63,19 @@ fn get_peers() -> Result<Vec<(PublicKey, SocketAddr)>, &'static str> {
             .map_err(|_| "Invalid enode public key ")?;
 
         nodes.push((enode_public_key, socket_address));
+
+        if nodes.len() > MAX_ENODES {return Err("Too many peers in arguments! ");}
     }
     Ok(nodes)
 }
 
 async fn establish_session(public_key: PublicKey, socket_address: SocketAddr) {
-    match TcpStream::connect(&socket_address) {
+    match TcpStream::connect(&socket_address).await {
         Ok(mut stream) => {
             info!("TCP connection established! ");
         }
         Err(e) => {
-            info!("TCP connection failed! ");
+            info!("TCP connection failed! Error {:?} ", e);
         }
     }
 }
