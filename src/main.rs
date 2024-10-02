@@ -11,7 +11,7 @@ fn main() {
     };
 
     for (public_key, ip_address) in peers_eip{
-        establish_session(public_key, ip_address);
+        let future =  establish_session(public_key, ip_address);
     }
 }
 
@@ -59,13 +59,13 @@ fn get_peers() -> Result<Vec<(PublicKey, SocketAddr)>, &'static str>
 }
 
 
-fn establish_session(public_key: PublicKey, socket_address: SocketAddr)
+async fn establish_session(public_key: PublicKey, socket_address: SocketAddr)
 {
     match TcpStream::connect(&socket_address) {
         Ok(mut stream) => {
-            info!("TCP stream established! ");}
+            info!("TCP connection established! ");}
         Err(e) => {
-            info!("TCP stream failed! ");
+            info!("TCP connection failed! ");
         }
     }
 }
