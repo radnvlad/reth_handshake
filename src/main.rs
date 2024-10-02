@@ -1,10 +1,8 @@
+use futures::executor::block_on;
 use log::{debug, error, info, warn};
 use secp256k1::{PublicKey, SecretKey};
 use std::{
-    env,
-    fmt::Error,
-    net::{SocketAddr, ToSocketAddrs},
-    str::FromStr,
+    env, fmt::Error, future::Future, net::{SocketAddr, ToSocketAddrs}, str::FromStr
 };
 use tokio::net::TcpStream;
 
@@ -18,10 +16,7 @@ fn main() {
             return;
         }
     };
-
-    for (public_key, ip_address) in peers_eip {
-        let future = establish_session(public_key, ip_address);
-    }
+    multi_connection_runner(peers_eip);
 }
 
 fn get_peers() -> Result<Vec<(PublicKey, SocketAddr)>, &'static str> {
@@ -67,6 +62,18 @@ fn get_peers() -> Result<Vec<(PublicKey, SocketAddr)>, &'static str> {
         if nodes.len() > MAX_ENODES {return Err("Too many peers in arguments! ");}
     }
     Ok(nodes)
+}
+
+// #[launch]
+#[tokio::main(flavor = "current_thread")]
+// #[tokio::main]
+async fn multi_connection_runner(peers: Vec<(PublicKey, SocketAddr)>  ) {
+
+
+    // let mut futures_list: Vec<impt> = Vec::new();
+    for (public_key, ip_address) in peers {
+        establish_session(public_key, ip_address).await;
+    }
 }
 
 async fn establish_session(public_key: PublicKey, socket_address: SocketAddr) {
