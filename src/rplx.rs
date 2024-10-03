@@ -40,7 +40,7 @@ impl RPLx {
     }
 
     pub fn create_auth_request(&self) -> BytesMut  {
-        
+        BytesMut::default()
     }
 
     pub fn get_state(&self) -> RplxState {

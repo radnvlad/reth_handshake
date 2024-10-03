@@ -1,15 +1,18 @@
 use futures::executor::block_on;
 use log::{debug, error, info, warn};
+use messages::RPLx_Message;
 use secp256k1::{PublicKey, SecretKey};
+use tokio_util::codec::Framed;
 use std::{
     env, fmt::Error, future::Future, net::{SocketAddr, ToSocketAddrs}, str::FromStr
 };
+use futures::SinkExt;
 use tokio::net::TcpStream;
 
 use crate::rplx::RPLx;
 
 mod rplx;
-mod ecies;
+// mod ecies;
 mod messages;
 
 fn main() {
@@ -89,7 +92,7 @@ enum SessionState {
     ProtocolActive
 }
 
-async fn handle_session(private_key: SecretKey, public_key: PublicKey, socket_address: SocketAddr) {
+async fn handle_session(private_key: SecretKey, public_key: PublicKey, socket_address: SocketAddr) -> Result<(), &'static str> {
     let mut stream = match TcpStream::connect(&socket_address).await {
         Ok(stream) => {
             info!("TCP connection to {:?} established! ", socket_address.to_string());
@@ -97,9 +100,16 @@ async fn handle_session(private_key: SecretKey, public_key: PublicKey, socket_ad
         }
         Err(e) => {
             info!("TCP connection to {:?} failed! Error {:?} ", socket_address.to_string(), e);
-            return;
+            return Err("TCP connection failed!");
         }
     };
+
+    let rplx_tp = RPLx::new();
+
+    let mut framed = Framed::new(stream, rplx_tp);
+
+    framed.send(RPLx_Message::Auth).await.map_err(|_|"Frame send Error ")?;
+
 
     let mut state =  SessionState::SendingAuth;
 
@@ -121,8 +131,5 @@ async fn handle_session(private_key: SecretKey, public_key: PublicKey, socket_ad
             }
         }
     }
-
-
-
 
 }
