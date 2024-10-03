@@ -92,7 +92,7 @@ enum SessionState {
     ProtocolActive
 }
 
-async fn handle_session(private_key: SecretKey, public_key: PublicKey, socket_address: SocketAddr) -> Result<(), &'static str> {
+async fn handle_session(private_key: SecretKey, peer_public_key: PublicKey, socket_address: SocketAddr) -> Result<(), &'static str> {
     let mut stream = match TcpStream::connect(&socket_address).await {
         Ok(stream) => {
             info!("TCP connection to {:?} established! ", socket_address.to_string());
@@ -106,7 +106,11 @@ async fn handle_session(private_key: SecretKey, public_key: PublicKey, socket_ad
 
     let rplx_tp = RPLx::new();
 
+    rplx_tp.construct_auth_request(private_key, peer_public_key);
+
     let mut framed = Framed::new(stream, rplx_tp);
+
+    
 
     framed.send(RPLx_Message::Auth).await.map_err(|_|"Frame send Error ")?;
 
