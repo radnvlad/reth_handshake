@@ -6,6 +6,11 @@ use std::{
 };
 use tokio::net::TcpStream;
 
+use crate::rplx::RPLx;
+
+mod rplx;
+mod ecies;
+mod messages;
 
 fn main() {
     env_logger::init();
@@ -69,20 +74,55 @@ fn get_peers() -> Result<Vec<(PublicKey, SocketAddr)>, &'static str> {
 // #[tokio::main]
 async fn multi_connection_runner(peers: Vec<(PublicKey, SocketAddr)>  ) {
 
+    let private_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
 
     // let mut futures_list: Vec<impt> = Vec::new();
     for (public_key, ip_address) in peers {
-        establish_session(public_key, ip_address).await;
+        handle_session(private_key, public_key, ip_address).await;
     }
 }
 
-async fn establish_session(public_key: PublicKey, socket_address: SocketAddr) {
-    match TcpStream::connect(&socket_address).await {
-        Ok(mut stream) => {
+enum SessionState {
+    SendingAuth,
+    RecivingAuthAck,
+    RecievingHello,
+    ProtocolActive
+}
+
+async fn handle_session(private_key: SecretKey, public_key: PublicKey, socket_address: SocketAddr) {
+    let mut stream = match TcpStream::connect(&socket_address).await {
+        Ok(stream) => {
             info!("TCP connection to {:?} established! ", socket_address.to_string());
+            stream
         }
         Err(e) => {
             info!("TCP connection to {:?} failed! Error {:?} ", socket_address.to_string(), e);
+            return;
+        }
+    };
+
+    let mut state =  SessionState::SendingAuth;
+
+    loop {
+        match state {
+            SessionState::SendingAuth => {
+
+                // framed.next().await;
+                state = SessionState::RecivingAuthAck;
+            }
+            SessionState::RecivingAuthAck => {
+
+            }
+            SessionState::RecievingHello => {
+
+            }
+            SessionState::ProtocolActive => {
+
+            }
         }
     }
+
+
+
+
 }

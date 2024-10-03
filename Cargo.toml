@@ -6,7 +6,11 @@ edition = "2021"
 [dependencies]
 env_logger = "0.11.3"
 log = "0.4.22"
-secp256k1 = "0.29.1"
+secp256k1 = { version = "0.29.1", features = [
+  "global-context",
+  "rand-std",
+  "recovery",
+] }
 hex = "0.4.3"
 futures = "0.3.30"
 tokio = { version = "1.40.0", features = [
@@ -16,3 +20,11 @@ tokio = { version = "1.40.0", features = [
   "time",
   "io-util",
 ] }
+tokio-util = { version = "0.7.12", features = ["codec"] }
+snap = "1.1.1"
+alloy-rlp = { version = "0.3.7", features = ["derive"] }
+rlp = "0.5.2"
+sha2 = "0.10.7"
+aes = "0.8.3"
+hmac = "0.12.1"
+ethereum-types = "0.14.1"
