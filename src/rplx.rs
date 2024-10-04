@@ -1,17 +1,19 @@
-
-
-
 use alloy_rlp::BytesMut;
-use ethereum_types::H256;
+use ethereum_types::{H128, H256};
 use rlp::RlpStream;
+use sha2::{Sha256,Digest};
 use snap::raw::Decoder as SnapDecoder;
 use tokio_util::codec::{Decoder, Encoder};
 use crate::{
     // error::Error, 
     messages::{Disconnect, Hello, Ping, Pong, RPLx_Message, Status}};
 use log::{debug, error, info, warn};
-
+use ctr::cipher::KeyIvInit;
+use ctr::cipher::StreamCipher;
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
+use hmac::{Hmac, Mac};
+pub type Aes128Ctr64BE = ctr::Ctr64BE<aes::Aes128>;
+
 
 #[derive(Clone, Copy)]
 pub enum RplxState{
@@ -48,20 +50,13 @@ impl RPLx {
         }
     }
 
-
-    pub fn construct_auth_request(&self, private_key: SecretKey, peer_public_key: PublicKey) -> BytesMut  {
+    pub fn construct_auth_request(&self, derived_shared_key: H256, peer_public_key: PublicKey) -> BytesMut  {
         
-        // We derive the shared secret S = Px
-        //   where (Px, Py) = r * KB
-        // And then we handle it as a 256bit hash.
-        let shared_key = H256::from_slice(
-            &secp256k1::ecdh::shared_secret_point(&peer_public_key, &private_key)[..32]);
-
         let private_ephemeral_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
 
         let nonce = H256::random();
 
-        let msg = shared_key ^ nonce;
+        let msg = derived_shared_key ^ nonce;
 
         let (rec_id, sig) = SECP256K1
         .sign_ecdsa_recoverable(
@@ -84,12 +79,51 @@ impl RPLx {
         stream.append(&PROTOCOL_VERSION);
         
         let auth_body = stream.out();
+        
+        //self.encrypt(auth_body, &mut buf);
+        //***
+        let random_secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        //let shared_key = self.calculate_shared_key(&self.remote_public_key, &random_secret_key)?;
+        //***
+        let shared_key = H256::from_slice( &secp256k1::ecdh::shared_secret_point(&peer_public_key, &random_secret_key)[..32]);
+        //===let shared_key = self.calculate_shared_key(&self.remote_public_key, &random_secret_key)?;
+        let iv = H128::random();
+
+        //let (encryption_key, mac_key) = self.derive_keys(&shared_key)?;
+        //***
+        let mut key = [0_u8; 32];
+        concat_kdf::derive_key_into::<Sha256>(shared_key.as_bytes(), &[], &mut key).unwrap();
+
+        let encryption_key = H128::from_slice(&key[..16]);
+        let mac_key = H256::from(Sha256::digest(&key[16..32]).as_ref());
+        //===let (encryption_key, mac_key) = self.derive_keys(&shared_key)?;
+        let total_size = u16::try_from(65 + 16 + auth_body.len() + 32)
+        .unwrap();
+        // TODO 
+        let encrypted_data = self.encrypt_data_aes(auth_body, &iv, &encryption_key);
+        // let x = &encryption_key;
+        // let y = &iv;
+        // let mut encryptor = Aes128Ctr64BE::new(&encryption_key.as_ref().into(), &iv.as_ref().into());//.apply_keystream(&mut auth_body);
+        //===let encrypted_data = self.encrypt_data(data_in, &iv, &encryption_key);
+        //let tag = self.calculate_tag(&mac_key, &iv, &total_size.to_be_bytes(), &encrypted_data)?;
+
+        let mut hmac = Hmac::<Sha256>::new_from_slice(mac_key.as_ref()).unwrap();
+        hmac.update(iv.as_bytes());
+        hmac.update(&encrypted_data);
+        hmac.update(&total_size.to_be_bytes());
+        let tag = H256::from_slice(&hmac.finalize().into_bytes());
+        //===self.encrypt(auth_body, &mut buf);
 
 
         
         BytesMut::default()
     }
 
+    fn encrypt_data_aes(&self, mut data: BytesMut, iv: &H128, encryption_key: &H128) -> BytesMut {
+        let mut encryptor:aes::cipher::StreamCipherCoreWrapper<ctr::CtrCore<aes::Aes128, ctr::flavors::Ctr64BE>>  = Aes128Ctr64BE::new(encryption_key.as_ref().into(), iv.as_ref().into());
+        encryptor.apply_keystream(&mut data);
+        data
+    }
 
     pub fn get_auth_request(&self) -> BytesMut  {
 
