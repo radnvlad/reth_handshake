@@ -1,3 +1,4 @@
+use ecies::Ecies;
 use ethereum_types::H256;
 use futures::executor::block_on;
 use log::{debug, error, info, warn};
@@ -14,7 +15,7 @@ use tokio::net::TcpStream;
 use crate::rplx::RPLx;
 
 mod rplx;
-// mod ecies;
+mod ecies;
 mod messages;
 
 fn main() {
@@ -111,8 +112,9 @@ async fn handle_session(private_key: SecretKey, peer_public_key: PublicKey, sock
     // We derive the shared secret S = Px
     //   where (Px, Py) = r * KB
     // And then we handle it as a 256bit hash.
-    let shared_key = H256::from_slice(
-        &secp256k1::ecdh::shared_secret_point(&peer_public_key, &private_key)[..32]);
+    let shared_key = Ecies::derive_shared_secret_key(peer_public_key, private_key);
+
+    // We create the 
     let our_public_key = PublicKey::from_secret_key(SECP256K1, &private_key);
     rplx_tp.construct_auth_request(shared_key, our_public_key, peer_public_key);
 

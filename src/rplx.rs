@@ -6,7 +6,7 @@ use snap::raw::Decoder as SnapDecoder;
 use tokio_util::codec::{Decoder, Encoder};
 use crate::{
     // error::Error, 
-    messages::{Disconnect, Hello, Ping, Pong, RPLx_Message, Status}};
+    ecies::Ecies, messages::{Disconnect, Hello, Ping, Pong, RPLx_Message, Status}};
 use log::{debug, error, info, warn};
 use ctr::cipher::KeyIvInit;
 use ctr::cipher::StreamCipher;
@@ -36,6 +36,7 @@ pub struct RPLx {
     rplx_state: RplxState,
     direction: RplxDirection, 
     auth_request: BytesMut,
+    ecies: Ecies
 }
 
 const PROTOCOL_VERSION: usize = 5;
@@ -46,23 +47,24 @@ impl RPLx {
         Self {
             rplx_state: RplxState::WaitingConnection,
             direction: RplxDirection::Outgoing,
-            auth_request: BytesMut::with_capacity(300),
+            auth_request: BytesMut::with_capacity(300),// todo
+            ecies: Ecies::new(),
         }
     }
 
     pub fn construct_auth_request(&mut self, derived_shared_key: H256, our_public_key:PublicKey, peer_public_key: PublicKey){
-
-        debug!("Peer public key is {:?}", peer_public_key.to_string());
         
-        let private_ephemeral_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        // Generate random keypair to for ECDH.
+        let private_ephemeral_key = Ecies::generate_random_secret_key();
 
+        // Generate random initiator nonce.
         let nonce = H256::random();
 
         let msg = derived_shared_key ^ nonce;
 
         let (rec_id, sig) = SECP256K1
         .sign_ecdsa_recoverable(
-            &secp256k1::Message::from_slice(msg.as_bytes()).unwrap(),
+            &secp256k1::Message::from_digest_slice(msg.as_bytes()).unwrap(),
             &private_ephemeral_key,
         )
         .serialize_compact();
