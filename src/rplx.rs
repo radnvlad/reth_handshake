@@ -3,7 +3,7 @@ use crate::{
     ecies::Ecies,
     messages::{Disconnect, Hello, Ping, Pong, RLPx_Message, Status},
 };
-use alloy_rlp::BytesMut;
+use alloy_rlp::{Buf, BytesMut};
 use ctr::cipher::KeyIvInit;
 use ctr::cipher::StreamCipher;
 use ethereum_types::{H128, H256};
@@ -44,12 +44,12 @@ const PROTOCOL_VERSION: usize = 5;
 const ZERO_HEADER: &[u8; 3] = &[194, 128, 128]; // Hex{0xC2, 0x80, 0x80} -> u8 &[194, 128, 128]
 
 impl RLPx {
-    pub fn new(peer_public_key: PublicKey,) -> Self {
+    pub fn new(our_private_key: SecretKey, peer_public_key: PublicKey,) -> Self {
         Self {
             rlpx_state: RlpxState::WaitingConnection,
             direction: RlpxDirection::Outgoing,
             auth_request: BytesMut::new(), // todo
-            ecies: Ecies::new(peer_public_key),
+            ecies: Ecies::new(our_private_key, peer_public_key),
         }
     }
 
@@ -61,13 +61,8 @@ impl RLPx {
         // Generate random keypair to for ECDH.
         let private_ephemeral_key = Ecies::generate_random_secret_key();
 
-        debug!("private_ephemeral_key {:#?}!", private_ephemeral_key);
-
-
         // Generate random initiator nonce.
         let nonce = H256::random();
-
-        debug!("nonce {:?}!", nonce.as_bytes());
 
         let msg = derived_shared_key ^ nonce;
 
@@ -81,9 +76,6 @@ impl RLPx {
         let mut signature: [u8; 65] = [0; 65];
         signature[..64].copy_from_slice(&sig);
         signature[64] = rec_id.to_i32() as u8;
-
-        debug!("signature {:?}!", signature);
-
 
         let full_pub_key = our_public_key.serialize_uncompressed();
         let public_key = &full_pub_key[1..];
@@ -115,8 +107,8 @@ impl Encoder<RLPx_Message> for RLPx {
         debug!("Encoding message {:?}!", item);
         match item {
             RLPx_Message::Auth => {
-                // self.state = State::AuthAck;
-                // dst.extend_from_slice(&self.handshake.auth());
+                dst.clear();
+
                 dst.extend_from_slice(&self.auth_request);
             }
             RLPx_Message::AuthAck => {
@@ -148,12 +140,13 @@ impl Decoder for RLPx {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        // debug!("We're decoding!! Data recieved is {:?} ", src);
-        debug!("We're decoding!! Data recieved! ");
+        debug!("We're decoding!! ");
 
         if src.is_empty() {
             return Ok(None);
         }
+        let decrypted = self.ecies.decrypt(src).map_err(|e| {debug!("Frame send Error {:?}", e)});
+
 
         // match 
         // debug!("In Decode, state is {:?}", self.state);

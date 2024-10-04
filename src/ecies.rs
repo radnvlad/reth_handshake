@@ -1,6 +1,7 @@
 use aes::cipher::{KeyIvInit, StreamCipher};
 use ethereum_types::{H128, H256};
 use hmac::{Hmac, Mac};
+use log::debug;
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use sha2::{Digest, Sha256};
 use tokio_util::bytes::{Bytes, BytesMut};
@@ -9,12 +10,13 @@ use crate::rplx::Aes128Ctr64BE;
 
 #[derive(Debug)]
 pub struct Ecies {
+    our_private_key: SecretKey,
     peer_public_key: PublicKey,
     nonce: H256,
 }
 
 impl Ecies {
-    pub fn new(peer_public_key:PublicKey) -> Self {
+    pub fn new(our_private_key: SecretKey, peer_public_key:PublicKey) -> Self {
         // let private_ephemeral_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
         // let public_key = PublicKey::from_secret_key(SECP256K1, &private_key);
         // let shared_key = H256::from_slice(
@@ -27,6 +29,7 @@ impl Ecies {
             // public_key,
             // remote_public_key,
             // shared_key,
+            our_private_key,
             peer_public_key,
             nonce: H256::random(),
             // auth: None,
@@ -54,6 +57,32 @@ impl Ecies {
         encryptor.apply_keystream(&mut data);
         data
     }
+
+    fn derive_keys(shared_key: &H256) -> Result<(H128, H256), &'static str> {
+        let mut key = [0_u8; 32];
+        concat_kdf::derive_key_into::<Sha256>(shared_key.as_bytes(), &[], &mut key)
+            .map_err(|e| "Key derivation failed!")?;
+
+        let encryption_key = H128::from_slice(&key[..16]);
+        let mac_key = H256::from(Sha256::digest(&key[16..32]).as_ref());
+
+        Ok((encryption_key, mac_key))
+    }
+
+    // calculate_remote_tag and calculate_tag can get rolled together I think
+    fn calculate_remote_tag(
+        mac_key: &[u8],
+        iv: H128,
+        encrypted_data: &[u8],
+        payload_size: u16,
+    ) -> H256 {
+        let mut hmac = Hmac::<Sha256>::new_from_slice(mac_key).expect("HMAC creation failed");
+        hmac.update(iv.as_bytes());
+        hmac.update(encrypted_data);
+        hmac.update(&payload_size.to_be_bytes());
+        H256::from_slice(&hmac.finalize().into_bytes())
+    }
+    
 
     pub fn encrypt(&self, data_to_encrypt: BytesMut, data_encrypted_out: &mut BytesMut )
     {
@@ -96,50 +125,67 @@ impl Ecies {
         //===self.encrypt(auth_body, &mut buf);
     }
 
-    // pub fn decrypt<'a>(&mut self, data_in: &'a mut [u8]) ->  Result<(), &'static str>  {
-    //     const PUBLIC_KEY_SIZE:usize = 65;
-    //     const IV_SIZE:usize = 16;
+    pub fn decrypt<'a>(&mut self, data_in: &'a mut [u8]) ->  Result<&'a mut [u8], &'static str>  {
+        const PUBLIC_KEY_SIZE:usize = 65;
+        const IV_SIZE:usize = 16;
+        const TAG_SIZE:usize = 32;
 
+        debug!("Raw Encrypted data is: {:?} ", data_in);
+
+
+        let (payload_size, rest) = data_in.split_at_mut_checked(2)
+            .ok_or("No payload size!")?;
+
+        let payload_size = u16::from_be_bytes([payload_size[0], payload_size[1]]) as usize;
+
+        if rest.len() < payload_size {
+            return Err("Too small payload size");
+        }
+
+        let (pub_data, rest) = rest.split_at_mut_checked(PUBLIC_KEY_SIZE)
+        .ok_or("No public key data!")?;
+
+        let (iv, rest) = rest.split_at_mut_checked(IV_SIZE)
+        .ok_or("No IV (initialization vector)!")?;
+
+        let (encrypted_data, tag) = rest.split_at_mut_checked(payload_size - (PUBLIC_KEY_SIZE + IV_SIZE + TAG_SIZE))
+        .ok_or("Invalid tag field size! ")?;
+
+        let remote_ephemeral_pub_key = PublicKey::from_slice(pub_data).map_err(|_|"Key conversion failed ")?;
+
+        let tag = H256::from_slice(&tag[..32]);
+
+        let shared_key = Self::derive_shared_secret_key(remote_ephemeral_pub_key, self.our_private_key);
+
+        let (encryption_key, mac_key) = Self::derive_keys(&shared_key)?;
+        let iv = H128::from_slice(iv);
+
+        let remote_tag =
+            Self::calculate_remote_tag(mac_key.as_ref(), iv, encrypted_data, payload_size as u16);
+
+        if tag != remote_tag {
+            return Err("Tag mismatch!");
+        }
+
+        let encrypted_key = H128::from_slice(encryption_key.as_bytes());
+        let mut decryptor = Aes128Ctr64BE::new(encrypted_key.as_ref().into(), iv.as_ref().into());
+        decryptor.apply_keystream(encrypted_data);
+
+        debug!("Decrypted data is: {:?} ", encrypted_data);
+
+        Ok(encrypted_data)
+    }
+    // pub fn decrypt<'a>(&mut self, data_in: &'a mut [u8]) ->  Result<(), &'static str> {
     //     let (payload_size, rest) = data_in.split_at_mut_checked(2)
     //         .ok_or("No payload size!")?;
-
     //     let payload_size = u16::from_be_bytes([payload_size[0], payload_size[1]]) as usize;
+    //     debug!("Raw payload size is {:?} ",payload_size );
+    //     let test = rest.as_ref();
+    //     debug!("Raw encrypted payload is {:?}",test );
 
-    //     if rest.len() < payload_size {
-    //         return Err("Invalid payload size");
-    //     }
 
-    //     let (pub_data, rest) = data_in.split_at_mut_checked(PUBLIC_KEY_SIZE)
-    //     .ok_or("No public key data!")?;
-
-    //     let (iv, rest) = data_in.split_at_mut_checked(IV_SIZE)
-    //     .ok_or("No IV (initialization vector)!")?;
-
-    //     let payload_size = u16::from_be_bytes([data_in[0], data_in[1]]);
-    //     let auth_response = Some(Bytes::copy_from_slice(
-    //         &data_in[..payload_size as usize + 2],
-    //     ));
-
-    //     let (iv, rest) = rest.split_at_mut(16);
-    //     let (encrypted_data, tag) = rest.split_at_mut(payload_size as usize - (65 + 16 + 32));
-    //     let tag = H256::from_slice(&tag[..32]);
-
-    //     let shared_key = self.calculate_shared_key(&remote_ephemeral_pub_key, &self.private_key)?;
-    //     let (encryption_key, mac_key) = self.derive_keys(&shared_key)?;
-    //     let iv = H128::from_slice(iv);
-
-    //     let remote_tag =
-    //         Self::calculate_remote_tag(mac_key.as_ref(), iv, encrypted_data, payload_size);
-
-    //     if tag != remote_tag {
-    //         return Err(Error::InvalidTag(remote_tag));
-    //     }
-
-    //     let encrypted_key = H128::from_slice(encryption_key.as_bytes());
-    //     let mut decryptor = Aes128Ctr64BE::new(encrypted_key.as_ref().into(), iv.as_ref().into());
-    //     decryptor.apply_keystream(encrypted_data);
-
-    //     Ok(encrypted_data)
+    //     // Ok((decrypted_data))
+    //     Ok(())
     // }
 
 }
