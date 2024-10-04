@@ -46,11 +46,11 @@ impl RPLx {
         Self {
             rplx_state: RplxState::WaitingConnection,
             direction: RplxDirection::Outgoing,
-            auth_request: BytesMut::new(),
+            auth_request: BytesMut::with_capacity(300),
         }
     }
 
-    pub fn construct_auth_request(&self, derived_shared_key: H256, peer_public_key: PublicKey) -> BytesMut  {
+    pub fn construct_auth_request(&mut self, derived_shared_key: H256, peer_public_key: PublicKey){
         
         let private_ephemeral_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
 
@@ -106,17 +106,25 @@ impl RPLx {
         // let mut encryptor = Aes128Ctr64BE::new(&encryption_key.as_ref().into(), &iv.as_ref().into());//.apply_keystream(&mut auth_body);
         //===let encrypted_data = self.encrypt_data(data_in, &iv, &encryption_key);
         //let tag = self.calculate_tag(&mac_key, &iv, &total_size.to_be_bytes(), &encrypted_data)?;
-
+        //***
         let mut hmac = Hmac::<Sha256>::new_from_slice(mac_key.as_ref()).unwrap();
         hmac.update(iv.as_bytes());
         hmac.update(&encrypted_data);
         hmac.update(&total_size.to_be_bytes());
         let tag = H256::from_slice(&hmac.finalize().into_bytes());
+        //=== let tag = self.calculate_tag(&mac_key, &iv, &total_size.to_be_bytes(), &encrypted_data)?;
+        //*** self.prepare_output_data(*/
+        let mut data_out = BytesMut::new();
+        data_out.extend_from_slice(&total_size.to_be_bytes());
+        data_out.extend_from_slice(
+            &PublicKey::from_secret_key(SECP256K1, &random_secret_key).serialize_uncompressed(),
+        );
+        data_out.extend_from_slice(iv.as_bytes());
+        data_out.extend_from_slice(&encrypted_data);
+        data_out.extend_from_slice(tag.as_bytes());
         //===self.encrypt(auth_body, &mut buf);
-
-
-        
-        BytesMut::default()
+        self.auth_request.extend_from_slice(&data_out);
+    
     }
 
     fn encrypt_data_aes(&self, mut data: BytesMut, iv: &H128, encryption_key: &H128) -> BytesMut {
@@ -128,7 +136,7 @@ impl RPLx {
     pub fn get_auth_request(&self) -> BytesMut  {
 
 
-        BytesMut::default()
+        self.auth_request.clone()
     }
 
     pub fn get_state(&self) -> RplxState {
@@ -145,7 +153,7 @@ impl Encoder<RPLx_Message> for RPLx {
             RPLx_Message::Auth => {
                 // self.state = State::AuthAck;
                 // dst.extend_from_slice(&self.handshake.auth());
-                self.construct_auth_request(private_key, peer_public_key);
+                self.get_auth_request();
             }
             RPLx_Message::AuthAck => {
                 // Implement AuthAck encoding here

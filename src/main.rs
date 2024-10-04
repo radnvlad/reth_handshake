@@ -105,7 +105,7 @@ async fn handle_session(private_key: SecretKey, peer_public_key: PublicKey, sock
         }
     };
 
-    let rplx_tp = RPLx::new();
+    let mut rplx_tp = RPLx::new();
     // We derive the shared secret S = Px
     //   where (Px, Py) = r * KB
     // And then we handle it as a 256bit hash.
