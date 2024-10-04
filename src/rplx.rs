@@ -110,7 +110,7 @@ impl RPLx {
         //===let (encryption_key, mac_key) = self.derive_keys(&shared_key)?;
         let total_size = u16::try_from(65 + 16 + auth_body.len() + 32).unwrap();
         // TODO
-        let encrypted_data = self.encrypt_data_aes(auth_body, &iv, &encryption_key);
+        let encrypted_data = self.ecies.encrypt_data_aes(auth_body, &iv, &encryption_key);
         // let x = &encryption_key;
         // let y = &iv;
         // let mut encryptor = Aes128Ctr64BE::new(&encryption_key.as_ref().into(), &iv.as_ref().into());//.apply_keystream(&mut auth_body);
@@ -134,14 +134,6 @@ impl RPLx {
         data_out.extend_from_slice(tag.as_bytes());
         //===self.encrypt(auth_body, &mut buf);
         self.auth_request.extend_from_slice(&data_out);
-    }
-
-    fn encrypt_data_aes(&self, mut data: BytesMut, iv: &H128, encryption_key: &H128) -> BytesMut {
-        let mut encryptor: aes::cipher::StreamCipherCoreWrapper<
-            ctr::CtrCore<aes::Aes128, ctr::flavors::Ctr64BE>,
-        > = Aes128Ctr64BE::new(encryption_key.as_ref().into(), iv.as_ref().into());
-        encryptor.apply_keystream(&mut data);
-        data
     }
 
     pub fn get_auth_request(&self) -> BytesMut {

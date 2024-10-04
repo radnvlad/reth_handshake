@@ -5,6 +5,8 @@ use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use sha2::{Digest, Sha256};
 use tokio_util::bytes::{Bytes, BytesMut};
 
+use crate::rplx::Aes128Ctr64BE;
+
 #[derive(Debug)]
 pub struct Ecies {
     nonce: H256,
@@ -39,4 +41,17 @@ impl Ecies {
             &secp256k1::ecdh::shared_secret_point(&public_key, &private_key)[..32],
         );
     }
+
+    pub fn encrypt_data_aes(
+        &self,
+        mut data: BytesMut,
+        iv: &H128,
+        encryption_key: &H128,
+    ) -> BytesMut {
+        let mut encryptor = Aes128Ctr64BE::new(encryption_key.as_ref().into(), iv.as_ref().into());
+        encryptor.apply_keystream(&mut data);
+        data
+    }
+
+    
 }
