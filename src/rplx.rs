@@ -48,7 +48,7 @@ impl RPLx {
         Self {
             rplx_state: RplxState::WaitingConnection,
             direction: RplxDirection::Outgoing,
-            auth_request: BytesMut::with_capacity(300), // todo
+            auth_request: BytesMut::new(), // todo
             ecies: Ecies::new(peer_public_key),
         }
     }
@@ -86,15 +86,8 @@ impl RPLx {
         stream.append(&public_key);
         stream.append(&nonce.as_bytes());
         stream.append(&PROTOCOL_VERSION);
-
-        let data_out = stream.out();
-
-        let mut enc_auth_req =  BytesMut::new();
-
-        self.ecies.encrypt(data_out, &mut enc_auth_req);
-
-        self.auth_request.extend_from_slice(&enc_auth_req);
-
+        
+        self.ecies.encrypt(stream.out(), &mut self.auth_request);
     }
 
     pub fn get_auth_request(&self) -> BytesMut {
