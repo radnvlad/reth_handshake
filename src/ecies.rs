@@ -90,14 +90,13 @@ impl Ecies {
         let tag = H256::from_slice(&hmac.finalize().into_bytes());
         //=== let tag = self.calculate_tag(&mac_key, &iv, &total_size.to_be_bytes(), &encrypted_data)?;
         //*** self.prepare_output_data(*/
-        let mut data_out = BytesMut::new();
-        data_out.extend_from_slice(&total_size.to_be_bytes());
-        data_out.extend_from_slice(
+        data_encrypted_out.extend_from_slice(&total_size.to_be_bytes());
+        data_encrypted_out.extend_from_slice(
             &PublicKey::from_secret_key(SECP256K1, &random_secret_key).serialize_uncompressed(),
         );
-        data_out.extend_from_slice(iv.as_bytes());
-        data_out.extend_from_slice(&encrypted_data);
-        data_out.extend_from_slice(tag.as_bytes());
+        data_encrypted_out.extend_from_slice(iv.as_bytes());
+        data_encrypted_out.extend_from_slice(&encrypted_data);
+        data_encrypted_out.extend_from_slice(tag.as_bytes());
         //===self.encrypt(auth_body, &mut buf);
     }
 }
