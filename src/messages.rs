@@ -2,7 +2,7 @@ use alloy_rlp::{RlpDecodable, RlpEncodable};
 pub type Reason = usize;
 
 #[derive(Debug)]
-pub enum RPLx_Message {
+pub enum RLPx_Message {
     Auth,
     AuthAck,
     Hello,

@@ -58,11 +58,7 @@ impl Ecies {
     pub fn encrypt(&self, data_to_encrypt: BytesMut, data_encrypted_out: &mut BytesMut )
     {
         let random_secret_key = Self::generate_random_secret_key();
-        //let shared_key = self.calculate_shared_key(&self.remote_public_key, &random_secret_key)?;
-        //***
         let shared_key = Self::derive_shared_secret_key(self.peer_public_key, random_secret_key);
-        ;
-        //===let shared_key = self.calculate_shared_key(&self.remote_public_key, &random_secret_key)?;
         // Generate initialization vector, each package has a new, spanking fresh iv
         let iv = H128::random();
 

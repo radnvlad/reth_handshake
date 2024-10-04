@@ -1,7 +1,7 @@
 use crate::{
     // error::Error,
     ecies::Ecies,
-    messages::{Disconnect, Hello, Ping, Pong, RPLx_Message, Status},
+    messages::{Disconnect, Hello, Ping, Pong, RLPx_Message, Status},
 };
 use alloy_rlp::BytesMut;
 use ctr::cipher::KeyIvInit;
@@ -17,7 +17,7 @@ use tokio_util::codec::{Decoder, Encoder};
 pub type Aes128Ctr64BE = ctr::Ctr64BE<aes::Aes128>;
 
 #[derive(Clone, Copy)]
-pub enum RplxState {
+pub enum RlpxState {
     WaitingConnection,
     AuthSent,
     AuthAckRecieved,
@@ -28,14 +28,14 @@ pub enum RplxState {
 }
 
 #[derive(Clone, Copy)]
-pub enum RplxDirection {
+pub enum RlpxDirection {
     Outgoing,
     Incoming,
 }
 
-pub struct RPLx {
-    rplx_state: RplxState,
-    direction: RplxDirection,
+pub struct RLPx {
+    rlpx_state: RlpxState,
+    direction: RlpxDirection,
     auth_request: BytesMut,
     ecies: Ecies,
 }
@@ -43,11 +43,11 @@ pub struct RPLx {
 const PROTOCOL_VERSION: usize = 5;
 const ZERO_HEADER: &[u8; 3] = &[194, 128, 128]; // Hex{0xC2, 0x80, 0x80} -> u8 &[194, 128, 128]
 
-impl RPLx {
+impl RLPx {
     pub fn new(peer_public_key: PublicKey,) -> Self {
         Self {
-            rplx_state: RplxState::WaitingConnection,
-            direction: RplxDirection::Outgoing,
+            rlpx_state: RlpxState::WaitingConnection,
+            direction: RlpxDirection::Outgoing,
             auth_request: BytesMut::new(), // todo
             ecies: Ecies::new(peer_public_key),
         }
@@ -57,7 +57,6 @@ impl RPLx {
         &mut self,
         derived_shared_key: H256,
         our_public_key: PublicKey,
-        peer_public_key: PublicKey,
     ) {
         // Generate random keypair to for ECDH.
         let private_ephemeral_key = Ecies::generate_random_secret_key();
@@ -81,12 +80,14 @@ impl RPLx {
         let full_pub_key = our_public_key.serialize_uncompressed();
         let public_key = &full_pub_key[1..];
 
-        let mut stream = RlpStream::new_list(4);
+        // auth-body = [sig, initiator-pubk, initiator-nonce, auth-vsn, ...]
+        let mut stream: RlpStream = RlpStream::new_list(4);
         stream.append(&&signature[..]);
         stream.append(&public_key);
         stream.append(&nonce.as_bytes());
+        // auth-vsn = 4
         stream.append(&PROTOCOL_VERSION);
-        
+
         self.ecies.encrypt(stream.out(), &mut self.auth_request);
     }
 
@@ -94,39 +95,39 @@ impl RPLx {
         self.auth_request.clone()
     }
 
-    pub fn get_state(&self) -> RplxState {
-        self.rplx_state
+    pub fn get_state(&self) -> RlpxState {
+        self.rlpx_state
     }
 }
 
-impl Encoder<RPLx_Message> for RPLx {
+impl Encoder<RLPx_Message> for RLPx {
     type Error = std::io::Error;
 
-    fn encode(&mut self, item: RPLx_Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: RLPx_Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
         debug!("Encoding message {:?}!", item);
         match item {
-            RPLx_Message::Auth => {
+            RLPx_Message::Auth => {
                 // self.state = State::AuthAck;
                 // dst.extend_from_slice(&self.handshake.auth());
                 dst.extend_from_slice(&self.auth_request);
             }
-            RPLx_Message::AuthAck => {
+            RLPx_Message::AuthAck => {
                 // Implement AuthAck encoding here
                 todo!()
             }
-            RPLx_Message::Hello => {
+            RLPx_Message::Hello => {
                 todo!()
             }
-            RPLx_Message::Disconnect(reason) => {
+            RLPx_Message::Disconnect(reason) => {
                 todo!()
             }
-            RPLx_Message::Ping => {
+            RLPx_Message::Ping => {
                 todo!()
             }
-            RPLx_Message::Pong => {
+            RLPx_Message::Pong => {
                 todo!()
             }
-            RPLx_Message::Status(msg) => {
+            RLPx_Message::Status(msg) => {
                 todo!()
             }
         }
@@ -134,8 +135,8 @@ impl Encoder<RPLx_Message> for RPLx {
     }
 }
 
-impl Decoder for RPLx {
-    type Item = RPLx_Message;
+impl Decoder for RLPx {
+    type Item = RLPx_Message;
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -144,6 +145,8 @@ impl Decoder for RPLx {
         if src.is_empty() {
             return Ok(None);
         }
+
+        // match 
         // debug!("In Decode, state is {:?}", self.state);
 
         // match self.state {

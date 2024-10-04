@@ -4,7 +4,7 @@ use futures::executor::block_on;
 use futures::SinkExt;
 use futures::StreamExt;
 use log::{debug, error, info, warn};
-use messages::RPLx_Message;
+use messages::RLPx_Message;
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use std::{
     env,
@@ -16,7 +16,7 @@ use std::{
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
-use crate::rplx::RPLx;
+use crate::rplx::RLPx;
 
 mod ecies;
 mod messages;
@@ -124,7 +124,7 @@ async fn handle_session(
         }
     };
 
-    let mut rplx_tp = RPLx::new(peer_public_key);
+    let mut rplx_tp = RLPx::new(peer_public_key);
     // We derive the shared secret S = Px
     //   where (Px, Py) = r * KB
     // And then we handle it as a 256bit hash.
@@ -132,12 +132,12 @@ async fn handle_session(
 
     // We create the public key from the private key
     let our_public_key = PublicKey::from_secret_key(SECP256K1, &private_key);
-    rplx_tp.construct_auth_request(shared_key, our_public_key, peer_public_key);
+    rplx_tp.construct_auth_request(shared_key, our_public_key);
 
     let mut framed = Framed::new(stream, rplx_tp);
 
     framed
-        .send(RPLx_Message::Auth)
+        .send(RLPx_Message::Auth)
         .await
         .map_err(|_| "Frame send Error ")?;
 
