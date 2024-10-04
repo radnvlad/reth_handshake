@@ -2,7 +2,7 @@ use ethereum_types::H256;
 use futures::executor::block_on;
 use log::{debug, error, info, warn};
 use messages::RPLx_Message;
-use secp256k1::{PublicKey, SecretKey};
+use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use tokio_util::codec::Framed;
 use std::{
     env, fmt::Error, future::Future, net::{SocketAddr, ToSocketAddrs}, str::FromStr
@@ -82,6 +82,7 @@ async fn multi_connection_runner(peers: Vec<(PublicKey, SocketAddr)>  ) {
 
     // let mut futures_list: Vec<impt> = Vec::new();
     for (public_key, ip_address) in peers {
+        debug!("Peer public key is {:?}", public_key);
         handle_session(private_key, public_key, ip_address).await;
     }
 }
@@ -111,8 +112,8 @@ async fn handle_session(private_key: SecretKey, peer_public_key: PublicKey, sock
     // And then we handle it as a 256bit hash.
     let shared_key = H256::from_slice(
         &secp256k1::ecdh::shared_secret_point(&peer_public_key, &private_key)[..32]);
-
-    rplx_tp.construct_auth_request(shared_key, peer_public_key);
+    let our_public_key = PublicKey::from_secret_key(SECP256K1, &private_key);
+    rplx_tp.construct_auth_request(shared_key, our_public_key, peer_public_key);
 
     let mut framed = Framed::new(stream, rplx_tp);
 

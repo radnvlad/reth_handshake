@@ -50,7 +50,9 @@ impl RPLx {
         }
     }
 
-    pub fn construct_auth_request(&mut self, derived_shared_key: H256, peer_public_key: PublicKey){
+    pub fn construct_auth_request(&mut self, derived_shared_key: H256, our_public_key:PublicKey, peer_public_key: PublicKey){
+
+        debug!("Peer public key is {:?}", peer_public_key.to_string());
         
         let private_ephemeral_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
 
@@ -69,7 +71,7 @@ impl RPLx {
         signature[..64].copy_from_slice(&sig);
         signature[64] = rec_id.to_i32() as u8;
 
-        let full_pub_key = peer_public_key.serialize_uncompressed();
+        let full_pub_key = our_public_key.serialize_uncompressed();
         let public_key = &full_pub_key[1..];
 
         let mut stream = RlpStream::new_list(4);
@@ -153,7 +155,7 @@ impl Encoder<RPLx_Message> for RPLx {
             RPLx_Message::Auth => {
                 // self.state = State::AuthAck;
                 // dst.extend_from_slice(&self.handshake.auth());
-                self.get_auth_request();
+                dst.extend_from_slice(&self.auth_request);
             }
             RPLx_Message::AuthAck => {
                 // Implement AuthAck encoding here
