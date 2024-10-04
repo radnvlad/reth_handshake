@@ -95,4 +95,51 @@ impl Ecies {
         data_encrypted_out.extend_from_slice(tag.as_bytes());
         //===self.encrypt(auth_body, &mut buf);
     }
+
+    // pub fn decrypt<'a>(&mut self, data_in: &'a mut [u8]) ->  Result<(), &'static str>  {
+    //     const PUBLIC_KEY_SIZE:usize = 65;
+    //     const IV_SIZE:usize = 16;
+
+    //     let (payload_size, rest) = data_in.split_at_mut_checked(2)
+    //         .ok_or("No payload size!")?;
+
+    //     let payload_size = u16::from_be_bytes([payload_size[0], payload_size[1]]) as usize;
+
+    //     if rest.len() < payload_size {
+    //         return Err("Invalid payload size");
+    //     }
+
+    //     let (pub_data, rest) = data_in.split_at_mut_checked(PUBLIC_KEY_SIZE)
+    //     .ok_or("No public key data!")?;
+
+    //     let (iv, rest) = data_in.split_at_mut_checked(IV_SIZE)
+    //     .ok_or("No IV (initialization vector)!")?;
+
+    //     let payload_size = u16::from_be_bytes([data_in[0], data_in[1]]);
+    //     let auth_response = Some(Bytes::copy_from_slice(
+    //         &data_in[..payload_size as usize + 2],
+    //     ));
+
+    //     let (iv, rest) = rest.split_at_mut(16);
+    //     let (encrypted_data, tag) = rest.split_at_mut(payload_size as usize - (65 + 16 + 32));
+    //     let tag = H256::from_slice(&tag[..32]);
+
+    //     let shared_key = self.calculate_shared_key(&remote_ephemeral_pub_key, &self.private_key)?;
+    //     let (encryption_key, mac_key) = self.derive_keys(&shared_key)?;
+    //     let iv = H128::from_slice(iv);
+
+    //     let remote_tag =
+    //         Self::calculate_remote_tag(mac_key.as_ref(), iv, encrypted_data, payload_size);
+
+    //     if tag != remote_tag {
+    //         return Err(Error::InvalidTag(remote_tag));
+    //     }
+
+    //     let encrypted_key = H128::from_slice(encryption_key.as_bytes());
+    //     let mut decryptor = Aes128Ctr64BE::new(encrypted_key.as_ref().into(), iv.as_ref().into());
+    //     decryptor.apply_keystream(encrypted_data);
+
+    //     Ok(encrypted_data)
+    // }
+
 }

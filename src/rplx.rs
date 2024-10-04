@@ -61,8 +61,13 @@ impl RLPx {
         // Generate random keypair to for ECDH.
         let private_ephemeral_key = Ecies::generate_random_secret_key();
 
+        debug!("private_ephemeral_key {:#?}!", private_ephemeral_key);
+
+
         // Generate random initiator nonce.
         let nonce = H256::random();
+
+        debug!("nonce {:?}!", nonce.as_bytes());
 
         let msg = derived_shared_key ^ nonce;
 
@@ -76,6 +81,9 @@ impl RLPx {
         let mut signature: [u8; 65] = [0; 65];
         signature[..64].copy_from_slice(&sig);
         signature[64] = rec_id.to_i32() as u8;
+
+        debug!("signature {:?}!", signature);
+
 
         let full_pub_key = our_public_key.serialize_uncompressed();
         let public_key = &full_pub_key[1..];
@@ -140,7 +148,8 @@ impl Decoder for RLPx {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        debug!("We're decoding!! Data recieved is {:?} ", src);
+        // debug!("We're decoding!! Data recieved is {:?} ", src);
+        debug!("We're decoding!! Data recieved! ");
 
         if src.is_empty() {
             return Ok(None);
