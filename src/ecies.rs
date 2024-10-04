@@ -1,15 +1,13 @@
 use aes::cipher::{KeyIvInit, StreamCipher};
-use tokio_util::bytes::{Bytes, BytesMut};
 use ethereum_types::{H128, H256};
 use hmac::{Hmac, Mac};
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use sha2::{Digest, Sha256};
-
-
+use tokio_util::bytes::{Bytes, BytesMut};
 
 #[derive(Debug)]
 pub struct Ecies {
-    nonce: H256
+    nonce: H256,
 }
 
 impl Ecies {
@@ -38,6 +36,7 @@ impl Ecies {
 
     pub fn derive_shared_secret_key(public_key: PublicKey, private_key: SecretKey) -> H256 {
         return H256::from_slice(
-            &secp256k1::ecdh::shared_secret_point(&public_key, &private_key)[..32]);
+            &secp256k1::ecdh::shared_secret_point(&public_key, &private_key)[..32],
+        );
     }
 }

@@ -1,22 +1,23 @@
-use alloy_rlp::BytesMut;
-use ethereum_types::{H128, H256};
-use rlp::RlpStream;
-use sha2::{Sha256,Digest};
-use snap::raw::Decoder as SnapDecoder;
-use tokio_util::codec::{Decoder, Encoder};
 use crate::{
-    // error::Error, 
-    ecies::Ecies, messages::{Disconnect, Hello, Ping, Pong, RPLx_Message, Status}};
-use log::{debug, error, info, warn};
+    // error::Error,
+    ecies::Ecies,
+    messages::{Disconnect, Hello, Ping, Pong, RPLx_Message, Status},
+};
+use alloy_rlp::BytesMut;
 use ctr::cipher::KeyIvInit;
 use ctr::cipher::StreamCipher;
-use secp256k1::{PublicKey, SecretKey, SECP256K1};
+use ethereum_types::{H128, H256};
 use hmac::{Hmac, Mac};
+use log::{debug, error, info, warn};
+use rlp::RlpStream;
+use secp256k1::{PublicKey, SecretKey, SECP256K1};
+use sha2::{Digest, Sha256};
+use snap::raw::Decoder as SnapDecoder;
+use tokio_util::codec::{Decoder, Encoder};
 pub type Aes128Ctr64BE = ctr::Ctr64BE<aes::Aes128>;
 
-
 #[derive(Clone, Copy)]
-pub enum RplxState{
+pub enum RplxState {
     WaitingConnection,
     AuthSent,
     AuthAckRecieved,
@@ -27,16 +28,16 @@ pub enum RplxState{
 }
 
 #[derive(Clone, Copy)]
-pub enum RplxDirection{
+pub enum RplxDirection {
     Outgoing,
     Incoming,
 }
 
 pub struct RPLx {
     rplx_state: RplxState,
-    direction: RplxDirection, 
+    direction: RplxDirection,
     auth_request: BytesMut,
-    ecies: Ecies
+    ecies: Ecies,
 }
 
 const PROTOCOL_VERSION: usize = 5;
@@ -47,13 +48,17 @@ impl RPLx {
         Self {
             rplx_state: RplxState::WaitingConnection,
             direction: RplxDirection::Outgoing,
-            auth_request: BytesMut::with_capacity(300),// todo
+            auth_request: BytesMut::with_capacity(300), // todo
             ecies: Ecies::new(),
         }
     }
 
-    pub fn construct_auth_request(&mut self, derived_shared_key: H256, our_public_key:PublicKey, peer_public_key: PublicKey){
-        
+    pub fn construct_auth_request(
+        &mut self,
+        derived_shared_key: H256,
+        our_public_key: PublicKey,
+        peer_public_key: PublicKey,
+    ) {
         // Generate random keypair to for ECDH.
         let private_ephemeral_key = Ecies::generate_random_secret_key();
 
@@ -63,12 +68,12 @@ impl RPLx {
         let msg = derived_shared_key ^ nonce;
 
         let (rec_id, sig) = SECP256K1
-        .sign_ecdsa_recoverable(
-            &secp256k1::Message::from_digest_slice(msg.as_bytes()).unwrap(),
-            &private_ephemeral_key,
-        )
-        .serialize_compact();
-    
+            .sign_ecdsa_recoverable(
+                &secp256k1::Message::from_digest_slice(msg.as_bytes()).unwrap(),
+                &private_ephemeral_key,
+            )
+            .serialize_compact();
+
         let mut signature: [u8; 65] = [0; 65];
         signature[..64].copy_from_slice(&sig);
         signature[64] = rec_id.to_i32() as u8;
@@ -81,15 +86,17 @@ impl RPLx {
         stream.append(&public_key);
         stream.append(&nonce.as_bytes());
         stream.append(&PROTOCOL_VERSION);
-        
+
         let auth_body = stream.out();
-        
+
         //self.encrypt(auth_body, &mut buf);
         //***
         let random_secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
         //let shared_key = self.calculate_shared_key(&self.remote_public_key, &random_secret_key)?;
         //***
-        let shared_key = H256::from_slice( &secp256k1::ecdh::shared_secret_point(&peer_public_key, &random_secret_key)[..32]);
+        let shared_key = H256::from_slice(
+            &secp256k1::ecdh::shared_secret_point(&peer_public_key, &random_secret_key)[..32],
+        );
         //===let shared_key = self.calculate_shared_key(&self.remote_public_key, &random_secret_key)?;
         let iv = H128::random();
 
@@ -101,9 +108,8 @@ impl RPLx {
         let encryption_key = H128::from_slice(&key[..16]);
         let mac_key = H256::from(Sha256::digest(&key[16..32]).as_ref());
         //===let (encryption_key, mac_key) = self.derive_keys(&shared_key)?;
-        let total_size = u16::try_from(65 + 16 + auth_body.len() + 32)
-        .unwrap();
-        // TODO 
+        let total_size = u16::try_from(65 + 16 + auth_body.len() + 32).unwrap();
+        // TODO
         let encrypted_data = self.encrypt_data_aes(auth_body, &iv, &encryption_key);
         // let x = &encryption_key;
         // let y = &iv;
@@ -128,18 +134,17 @@ impl RPLx {
         data_out.extend_from_slice(tag.as_bytes());
         //===self.encrypt(auth_body, &mut buf);
         self.auth_request.extend_from_slice(&data_out);
-    
     }
 
     fn encrypt_data_aes(&self, mut data: BytesMut, iv: &H128, encryption_key: &H128) -> BytesMut {
-        let mut encryptor:aes::cipher::StreamCipherCoreWrapper<ctr::CtrCore<aes::Aes128, ctr::flavors::Ctr64BE>>  = Aes128Ctr64BE::new(encryption_key.as_ref().into(), iv.as_ref().into());
+        let mut encryptor: aes::cipher::StreamCipherCoreWrapper<
+            ctr::CtrCore<aes::Aes128, ctr::flavors::Ctr64BE>,
+        > = Aes128Ctr64BE::new(encryption_key.as_ref().into(), iv.as_ref().into());
         encryptor.apply_keystream(&mut data);
         data
     }
 
-    pub fn get_auth_request(&self) -> BytesMut  {
-
-
+    pub fn get_auth_request(&self) -> BytesMut {
         self.auth_request.clone()
     }
 
@@ -165,23 +170,18 @@ impl Encoder<RPLx_Message> for RPLx {
             }
             RPLx_Message::Hello => {
                 todo!()
-
             }
             RPLx_Message::Disconnect(reason) => {
                 todo!()
-
             }
             RPLx_Message::Ping => {
                 todo!()
-
             }
             RPLx_Message::Pong => {
                 todo!()
-
             }
             RPLx_Message::Status(msg) => {
                 todo!()
-
             }
         }
         Ok(())

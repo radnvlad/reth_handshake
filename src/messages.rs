@@ -73,4 +73,3 @@ pub struct Status {
 impl Status {
     pub const ID: u8 = 16;
 }
-

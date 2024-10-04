@@ -1,22 +1,26 @@
 use ecies::Ecies;
 use ethereum_types::H256;
 use futures::executor::block_on;
+use futures::SinkExt;
+use futures::StreamExt;
 use log::{debug, error, info, warn};
 use messages::RPLx_Message;
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
-use tokio_util::codec::Framed;
 use std::{
-    env, fmt::Error, future::Future, net::{SocketAddr, ToSocketAddrs}, str::FromStr
+    env,
+    fmt::Error,
+    future::Future,
+    net::{SocketAddr, ToSocketAddrs},
+    str::FromStr,
 };
-use futures::StreamExt;
-use futures::SinkExt;
 use tokio::net::TcpStream;
+use tokio_util::codec::Framed;
 
 use crate::rplx::RPLx;
 
-mod rplx;
 mod ecies;
 mod messages;
+mod rplx;
 
 fn main() {
     env_logger::init();
@@ -70,7 +74,9 @@ fn get_peers() -> Result<Vec<(PublicKey, SocketAddr)>, &'static str> {
 
         nodes.push((enode_public_key, socket_address));
 
-        if nodes.len() > MAX_ENODES {return Err("Too many peers in arguments! ");}
+        if nodes.len() > MAX_ENODES {
+            return Err("Too many peers in arguments! ");
+        }
     }
     Ok(nodes)
 }
@@ -78,8 +84,7 @@ fn get_peers() -> Result<Vec<(PublicKey, SocketAddr)>, &'static str> {
 // #[launch]
 #[tokio::main(flavor = "current_thread")]
 // #[tokio::main]
-async fn multi_connection_runner(peers: Vec<(PublicKey, SocketAddr)>  ) {
-
+async fn multi_connection_runner(peers: Vec<(PublicKey, SocketAddr)>) {
     let private_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
 
     // let mut futures_list: Vec<impt> = Vec::new();
@@ -93,17 +98,28 @@ enum SessionState {
     SendingAuth,
     RecivingAuthAck,
     RecievingHello,
-    ProtocolActive
+    ProtocolActive,
 }
 
-async fn handle_session(private_key: SecretKey, peer_public_key: PublicKey, socket_address: SocketAddr) -> Result<(), &'static str> {
+async fn handle_session(
+    private_key: SecretKey,
+    peer_public_key: PublicKey,
+    socket_address: SocketAddr,
+) -> Result<(), &'static str> {
     let mut stream = match TcpStream::connect(&socket_address).await {
         Ok(stream) => {
-            info!("TCP connection to {:?} established! ", socket_address.to_string());
+            info!(
+                "TCP connection to {:?} established! ",
+                socket_address.to_string()
+            );
             stream
         }
         Err(e) => {
-            info!("TCP connection to {:?} failed! Error {:?} ", socket_address.to_string(), e);
+            info!(
+                "TCP connection to {:?} failed! Error {:?} ",
+                socket_address.to_string(),
+                e
+            );
             return Err("TCP connection failed!");
         }
     };
@@ -114,37 +130,29 @@ async fn handle_session(private_key: SecretKey, peer_public_key: PublicKey, sock
     // And then we handle it as a 256bit hash.
     let shared_key = Ecies::derive_shared_secret_key(peer_public_key, private_key);
 
-    // We create the 
+    // We create the public key from the private key
     let our_public_key = PublicKey::from_secret_key(SECP256K1, &private_key);
     rplx_tp.construct_auth_request(shared_key, our_public_key, peer_public_key);
 
     let mut framed = Framed::new(stream, rplx_tp);
 
-    
+    framed
+        .send(RPLx_Message::Auth)
+        .await
+        .map_err(|_| "Frame send Error ")?;
 
-    framed.send(RPLx_Message::Auth).await.map_err(|_|"Frame send Error ")?;
-
-
-    let mut state =  SessionState::SendingAuth;
+    let mut state = SessionState::SendingAuth;
 
     loop {
         framed.next().await;
         match state {
             SessionState::SendingAuth => {
-
                 // framed.next().await;
                 state = SessionState::RecivingAuthAck;
             }
-            SessionState::RecivingAuthAck => {
-
-            }
-            SessionState::RecievingHello => {
-
-            }
-            SessionState::ProtocolActive => {
-
-            }
+            SessionState::RecivingAuthAck => {}
+            SessionState::RecievingHello => {}
+            SessionState::ProtocolActive => {}
         }
     }
-
 }
