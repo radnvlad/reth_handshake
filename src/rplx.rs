@@ -191,6 +191,8 @@ impl Decoder for RPLx {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        debug!("We're decoding!! Data recieved is {:?} ", src);
+
         if src.is_empty() {
             return Ok(None);
         }

@@ -7,6 +7,7 @@ use tokio_util::codec::Framed;
 use std::{
     env, fmt::Error, future::Future, net::{SocketAddr, ToSocketAddrs}, str::FromStr
 };
+use futures::StreamExt;
 use futures::SinkExt;
 use tokio::net::TcpStream;
 
@@ -125,6 +126,7 @@ async fn handle_session(private_key: SecretKey, peer_public_key: PublicKey, sock
     let mut state =  SessionState::SendingAuth;
 
     loop {
+        framed.next().await;
         match state {
             SessionState::SendingAuth => {
 
