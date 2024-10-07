@@ -1,6 +1,6 @@
 use crate::{
     // error::Error,
-    ecies::Ecies,
+    ecies::{ECIESDirection, ECIES},
     messages::{Disconnect, Hello, Ping, Pong, RLPx_Message, Status},
 };
 use alloy_rlp::{Buf, BytesMut};
@@ -16,7 +16,7 @@ use snap::raw::Decoder as SnapDecoder;
 use tokio_util::codec::{Decoder, Encoder};
 pub type Aes128Ctr64BE = ctr::Ctr64BE<aes::Aes128>;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RlpxState {
     WaitingConnection,
     AuthSent,
@@ -27,17 +27,12 @@ pub enum RlpxState {
     Disconnected,
 }
 
-#[derive(Clone, Copy)]
-pub enum RlpxDirection {
-    Outgoing,
-    Incoming,
-}
-
+#[derive(Clone, Debug)]
 pub struct RLPx {
     rlpx_state: RlpxState,
-    direction: RlpxDirection,
+    direction: ECIESDirection,
     auth_request: BytesMut,
-    ecies: Ecies,
+    ecies: ECIES,
 }
 
 const PROTOCOL_VERSION: usize = 5;
@@ -47,9 +42,9 @@ impl RLPx {
     pub fn new(our_private_key: SecretKey, peer_public_key: PublicKey) -> Self {
         Self {
             rlpx_state: RlpxState::WaitingConnection,
-            direction: RlpxDirection::Outgoing,
+            direction: ECIESDirection::Outgoing,
             auth_request: BytesMut::new(), // todo
-            ecies: Ecies::new(our_private_key, peer_public_key),
+            ecies: ECIES::new(our_private_key, peer_public_key),
         }
     }
 
@@ -130,6 +125,7 @@ impl Encoder<RLPx_Message> for RLPx {
                 todo!()
             }
         }
+        self.rlpx_state = RlpxState::AuthSent;
         Ok(())
     }
 }
@@ -141,53 +137,29 @@ impl Decoder for RLPx {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         debug!("We're decoding!! ");
 
-        if src.is_empty() {
-            return Ok(None);
+        match self.rlpx_state {
+
+            RlpxState::AuthSent =>
+            {
+                // debug!("We're decoding !! Raw Data is: {:?} ", src);
+
+                if src.is_empty() {
+                    return Ok(None);
+                }
+                let decrypted = self
+                    .ecies
+                    .decrypt(src)
+                    .map_err(|e| debug!("Frame decrypt Error {:?}", e));
+        
+                self.ecies.get_secrets();
+                self.rlpx_state = RlpxState::AuthAckRecieved;
+            } 
+            RlpxState::AuthAckRecieved => {
+                debug!("We're decoding frame!! ");
+
+            }
+            _ => return Ok(None)
         }
-        let decrypted = self
-            .ecies
-            .decrypt(src)
-            .map_err(|e| debug!("Frame decrypt Error {:?}", e));
-
-        self.ecies.get_secrets();
-        // let decrypted_xx =  self.ecies.decrypt_xx(src).map_err(|e| {debug!("Frame decrypt Error {:?}", e)});
-        // match
-        // debug!("In Decode, state is {:?}", self.state);
-
-        // match self.state {
-        //     State::Auth => {
-        //         self.state = State::AuthAck;
-        //         Ok(None)
-        //     }
-        //     State::AuthAck => {
-        //         if src.len() < 2 {
-        //             return Ok(None);
-        //         }
-
-        //         let payload = u16::from_be_bytes([src[0], src[1]]) as usize;
-        //         let total_size = payload + 2;
-
-        //         if src.len() < total_size {
-        //             return Ok(None);
-        //         }
-
-        //         let mut buf = src.split_to(total_size);
-        //         let auth_ack = self.handshake.decrypt(&mut buf)?;
-        //         self.handshake.derive_secrets(auth_ack)?;
-        //         self.state = State::Frame;
-        //         Ok(Some(Message::AuthAck))
-        //     }
-        //     State::Frame => match self.handshake.read_frame(&mut src[..]) {
-        //         Ok((frame, size_used)) => {
-        //             src.advance(size_used);
-        //             self.handle_incoming_frame(&frame).map(Some)
-        //         }
-        //         Err(e) => {
-        //             error!("Failed to read frame: {:?}", e);
-        //             Ok(None)
-        //         }
-        //     },
-        // }
         Ok(None)
     }
 }

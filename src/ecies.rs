@@ -1,3 +1,5 @@
+use std::net::Incoming;
+
 use aes::cipher::{KeyIvInit, StreamCipher};
 use ethereum_types::{H128, H256};
 use hmac::{Hmac, Mac};
@@ -10,15 +12,26 @@ use tokio_util::bytes::{Bytes, BytesMut};
 
 use crate::rplx::Aes128Ctr64BE;
 
-#[derive(Debug)]
-pub struct Ecies {
+#[derive(Clone, Copy, Debug)]
+pub enum ECIESDirection {
+    Outgoing,
+    Incoming,
+}
+
+
+#[derive(Clone, Debug)]
+pub struct ECIES {
+    connection_direction: ECIESDirection,
     our_private_key: SecretKey,
     peer_public_key: PublicKey,
     ephemeral_priv_key: SecretKey,
     ephemeral_remote_pub_key: Option<PublicKey>,
     init_nonce: H256,
     resp_nonce: H256,
+    auth: BytesMut,
+    ack: BytesMut,
 }
+
 
 pub struct HandshakeSecrets {
     static_shared_secret: H256,
@@ -26,21 +39,25 @@ pub struct HandshakeSecrets {
     shared_secret: H256,
     aes_secret: H256,
     mac_secret: H256,
+    
 }
 
 const PUBLIC_KEY_SIZE: usize = 65;
 const IV_SIZE: usize = 16;
 const TAG_SIZE: usize = 32;
 
-impl Ecies {
+impl ECIES {
     pub fn new(our_private_key: SecretKey, peer_public_key: PublicKey) -> Self {
         Self {
+            connection_direction: ECIESDirection::Outgoing,
             our_private_key,
             peer_public_key,
             ephemeral_priv_key: Self::generate_random_secret_key(),
             ephemeral_remote_pub_key: None,
             init_nonce: H256::random(),
             resp_nonce: H256::random(),
+            auth: BytesMut::new(),
+            ack: BytesMut::new(),
         }
     }
 
@@ -99,7 +116,7 @@ impl Ecies {
         H256::from_slice(&hmac.finalize().into_bytes())
     }
 
-    pub fn encrypt<'a>(&self, data_to_encrypt: BytesMut) -> Result<BytesMut, &'static str> {
+    pub fn encrypt<'a>(&mut self, data_to_encrypt: BytesMut) -> Result<BytesMut, &'static str> {
         // R = r * G
         let random_secret_key = Self::generate_random_secret_key();
         // S = Px where (Px, Py) = r * KB
@@ -127,10 +144,36 @@ impl Ecies {
         data_encrypted_out.extend_from_slice(iv.as_bytes());
         data_encrypted_out.extend_from_slice(&encrypted_data);
         data_encrypted_out.extend_from_slice(tag.as_bytes());
+        match self.connection_direction {
+            ECIESDirection::Outgoing => 
+            {
+                self.auth.clear();
+                self.auth.extend(&data_encrypted_out);
+            }
+            ECIESDirection::Incoming =>
+            {
+                self.ack.clear();
+                self.ack.extend(&data_encrypted_out);
+            }
+        }
         Ok(data_encrypted_out)
     }
 
     pub fn decrypt<'a>(&mut self, data_in: &'a mut [u8]) -> Result<&'a mut [u8], &'static str> {
+
+        match self.connection_direction {
+            ECIESDirection::Incoming => 
+            {
+                self.auth.clear();
+                self.auth.extend_from_slice(data_in);
+            }
+            ECIESDirection::Outgoing =>
+            {
+                self.ack.clear();
+                self.ack.extend_from_slice(data_in);
+            }
+        }
+
         // Payload size.
         let (payload_size, rest) = data_in.split_at_mut_checked(2).ok_or("No payload size!")?;
 
@@ -251,14 +294,44 @@ impl Ecies {
             Self::keccak256_hash(&[ephemeral_key.as_bytes(), shared_secret.as_bytes()]);
 
         let mac_secret = Self::keccak256_hash(&[ephemeral_key.as_bytes(), aes_secret.as_bytes()]);
-        // PublicKey::from_secret_key(SECP256K1, &private_key);
-        debug!(
-            "static_shared_secret is: {:?}",
-            static_shared_secret.as_bytes()
-        );
-        debug!("ephemeral_key is: {:?}", ephemeral_key.as_bytes());
-        debug!("shared_secret is: {:?}", shared_secret.as_bytes());
-        debug!("aes_secret is: {:?}", aes_secret.as_bytes());
-        debug!("mac_secret is: {:?}", mac_secret.as_bytes());
+
+        let ingress_mac:H256;
+        let egress_mac:H256;
+
+
+        match self.connection_direction {
+            ECIESDirection::Incoming => 
+            {
+                ingress_mac = Self::keccak256_hash(&[(mac_secret ^ self.resp_nonce).as_bytes(), &self.auth]);
+                egress_mac = Self::keccak256_hash(&[(mac_secret ^ self.init_nonce).as_bytes(), &self.ack]);
+            }
+            ECIESDirection::Outgoing =>
+            {
+
+                egress_mac = Self::keccak256_hash(&[(mac_secret ^ self.resp_nonce).as_bytes(), &self.auth]);
+                ingress_mac = Self::keccak256_hash(&[(mac_secret ^ self.init_nonce).as_bytes(), &self.ack]);
+            }
+        }
+
+
+        debug!("ack is: {:?}", self.ack.as_ref());
+        debug!("Auth is: {:?}", self.auth.as_ref());
+
+
+        // debug!(
+        //     "static_shared_secret is: {:?}",
+        //     static_shared_secret.as_bytes()
+        // );
+        // debug!("ephemeral_key is: {:?}", ephemeral_key.as_bytes());
+        // debug!("shared_secret is: {:?}", shared_secret.as_bytes());
+        // debug!("aes_secret is: {:?}", aes_secret.as_bytes());
+        // debug!("mac_secret is: {:?}", mac_secret.as_bytes());
+        // debug!("egress_mac is: {:?}", egress_mac.as_bytes());
+        // debug!("ingress_mac is: {:?}", ingress_mac.as_bytes());
+
+        // debug!("shared_secret is: {:?}", shared_secret.as_bytes());
+        // debug!("mac_secret is: {:?}", mac_secret.as_bytes());
+        // debug!("resp_nonce is: {:?}", self.resp_nonce.as_bytes());
+        // debug!("init_nonce is: {:?}", self.init_nonce.as_bytes());
     }
 }

@@ -1,4 +1,4 @@
-use ecies::Ecies;
+use ecies::ECIES;
 use ethereum_types::H256;
 use futures::executor::block_on;
 use futures::SinkExt;
@@ -128,7 +128,7 @@ async fn handle_session(
     // We derive the shared secret S = Px
     //   where (Px, Py) = r * KB
     // And then we handle it as a 256bit hash.
-    let shared_key = Ecies::agree(peer_public_key, private_key);
+    let shared_key = ECIES::agree(peer_public_key, private_key);
 
     // We create the public key from the private key
     let our_public_key = PublicKey::from_secret_key(SECP256K1, &private_key);
