@@ -2,6 +2,7 @@ use aes::cipher::{KeyIvInit, StreamCipher};
 use ethereum_types::{H128, H256};
 use hmac::{Hmac, Mac};
 use log::debug;
+use rlp::Rlp;
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use sha2::{Digest, Sha256};
 use sha3::Keccak256;
@@ -159,17 +160,19 @@ impl Ecies {
         let (pub_data, rest) = rest.split_at_mut_checked(PUBLIC_KEY_SIZE)
         .ok_or("No public key data!")?;
 
+        debug!("Extracted remote pub_data is: {:?}", pub_data);
+
         let (iv, rest) = rest.split_at_mut_checked(IV_SIZE)
         .ok_or("No IV (initialization vector)!")?;
 
         let (encrypted_data, tag) = rest.split_at_mut_checked(payload_size - (PUBLIC_KEY_SIZE + IV_SIZE + TAG_SIZE))
         .ok_or("Invalid tag field size! ")?;
 
-        self.ephemeral_remote_pub_key = Some(PublicKey::from_slice(pub_data).map_err(|_|"Key conversion failed ")?);
+        let remote_pub_key = PublicKey::from_slice(pub_data).map_err(|_|"Key conversion failed ")?;
 
         let tag = H256::from_slice(&tag[..32]);
 
-        let shared_key = Self::derive_shared_secret_key(self.ephemeral_remote_pub_key.unwrap(), self.our_private_key);
+        let shared_key = Self::derive_shared_secret_key(remote_pub_key, self.our_private_key);
 
         let (encryption_key, mac_key) = Self::derive_keys(&shared_key)?;
         let iv = H128::from_slice(iv);
@@ -184,6 +187,22 @@ impl Ecies {
         let encrypted_key = H128::from_slice(encryption_key.as_bytes());
         let mut decryptor = Aes128Ctr64BE::new(encrypted_key.as_ref().into(), iv.as_ref().into());
         decryptor.apply_keystream(encrypted_data);
+
+        // Decode Ack message. 
+        let rlp = Rlp::new(encrypted_data);
+        let recipient_ephemeral_pubk_raw: Bytes  = rlp.val_at(0).map_err(|_|"RLP ack structure invalid, missing ephemeral pubk!")?;
+
+        let mut buf = [4_u8; 65];
+        buf[1..].copy_from_slice(&recipient_ephemeral_pubk_raw);
+        self.ephemeral_remote_pub_key =
+            Some(PublicKey::from_slice(&buf).map_err(|_|"RLP ephemeral pubk is invalid!")?);
+
+        // self.ephemeral_remote_pub_key = Some(PublicKey::from_slice(&recipient_ephemeral_pubk_raw[1..]).map_err(|_|"RLP ephemeral pubk is invalid!")?);
+
+        let recipient_nonce: Vec<_> = rlp.val_at(1).map_err(|_|"RLP ack structure invalid, missing nonce!")?;
+        let _vsn: Vec<_> = rlp.val_at(2).map_err(|_|"RLP ack structure invalid, missing protocol version! ")?;
+
+        self.resp_nonce = H256::from_slice(&recipient_nonce);
 
         Ok(encrypted_data)
     }
@@ -225,12 +244,16 @@ impl Ecies {
         let aes_secret = Self::keccak256_hash(&[ephemeral_key.as_bytes(), shared_secret.as_bytes()]);
 
         let mac_secret = Self::keccak256_hash(&[ephemeral_key.as_bytes(), aes_secret.as_bytes()]);
-
-        debug!("static_shared_secret is: {:?}", static_shared_secret.as_bytes());
-        debug!("ephemeral_key is: {:?}", ephemeral_key.as_bytes());
-        debug!("shared_secret is: {:?}", shared_secret.as_bytes());
-        debug!("aes_secret is: {:?}", aes_secret.as_bytes());
-        debug!("mac_secret is: {:?}", mac_secret.as_bytes());
+        // PublicKey::from_secret_key(SECP256K1, &private_key);
+        // debug!("Initiator ephemeral_pub_key is: {:?}", self.ephemeral_priv_key.unwrap().serialize());
+        debug!("Initiator ephemeral_pub_key is: {:?}", PublicKey::from_secret_key(SECP256K1, &self.ephemeral_priv_key).serialize());
+        debug!("ephemeral_remote_pub_key is: {:?}", self.ephemeral_remote_pub_key.unwrap().serialize());
+        // debug!("ephemeral_key is: {:?}", ephemeral_key.as_bytes());
+        // debug!("init_nonce is: {:?}", self.init_nonce.as_bytes());
+        // debug!("resp_nonce is: {:?}", self.resp_nonce.as_bytes());
+        // debug!("shared_secret is: {:?}", shared_secret.as_bytes());
+        // debug!("aes_secret is: {:?}", aes_secret.as_bytes());
+        // debug!("mac_secret is: {:?}", mac_secret.as_bytes());
     }
 
 }
