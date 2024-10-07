@@ -190,14 +190,12 @@ impl Ecies {
 
         // Decode Ack message. 
         let rlp = Rlp::new(encrypted_data);
-        let recipient_ephemeral_pubk_raw: Bytes  = rlp.val_at(0).map_err(|_|"RLP ack structure invalid, missing ephemeral pubk!")?;
+        let recipient_ephemeral_pubk_raw: Vec<_>  = rlp.val_at(0).map_err(|_|"RLP ack structure invalid, missing ephemeral pubk!")?;
 
         let mut buf = [4_u8; 65];
         buf[1..].copy_from_slice(&recipient_ephemeral_pubk_raw);
         self.ephemeral_remote_pub_key =
             Some(PublicKey::from_slice(&buf).map_err(|_|"RLP ephemeral pubk is invalid!")?);
-
-        // self.ephemeral_remote_pub_key = Some(PublicKey::from_slice(&recipient_ephemeral_pubk_raw[1..]).map_err(|_|"RLP ephemeral pubk is invalid!")?);
 
         let recipient_nonce: Vec<_> = rlp.val_at(1).map_err(|_|"RLP ack structure invalid, missing nonce!")?;
         let _vsn: Vec<_> = rlp.val_at(2).map_err(|_|"RLP ack structure invalid, missing protocol version! ")?;
@@ -245,15 +243,12 @@ impl Ecies {
 
         let mac_secret = Self::keccak256_hash(&[ephemeral_key.as_bytes(), aes_secret.as_bytes()]);
         // PublicKey::from_secret_key(SECP256K1, &private_key);
-        // debug!("Initiator ephemeral_pub_key is: {:?}", self.ephemeral_priv_key.unwrap().serialize());
-        debug!("Initiator ephemeral_pub_key is: {:?}", PublicKey::from_secret_key(SECP256K1, &self.ephemeral_priv_key).serialize());
-        debug!("ephemeral_remote_pub_key is: {:?}", self.ephemeral_remote_pub_key.unwrap().serialize());
-        // debug!("ephemeral_key is: {:?}", ephemeral_key.as_bytes());
-        // debug!("init_nonce is: {:?}", self.init_nonce.as_bytes());
-        // debug!("resp_nonce is: {:?}", self.resp_nonce.as_bytes());
-        // debug!("shared_secret is: {:?}", shared_secret.as_bytes());
-        // debug!("aes_secret is: {:?}", aes_secret.as_bytes());
-        // debug!("mac_secret is: {:?}", mac_secret.as_bytes());
+        debug!("static_shared_secret is: {:?}", static_shared_secret.as_bytes());
+        debug!("ephemeral_key is: {:?}", ephemeral_key.as_bytes());
+        debug!("shared_secret is: {:?}", shared_secret.as_bytes());
+        debug!("aes_secret is: {:?}", aes_secret.as_bytes());
+        debug!("mac_secret is: {:?}", mac_secret.as_bytes());
+        
     }
 
 }
