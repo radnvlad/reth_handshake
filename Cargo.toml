@@ -24,7 +24,8 @@ tokio-util = { version = "0.7.12", features = ["codec"] }
 snap = "1.1.1"
 alloy-rlp = { version = "0.3.7", features = ["derive"] }
 rlp = "0.5.2"
-sha2 = "0.10.7"
+sha2 = "0.10.8"
+sha3 = "0.10.8"
 aes = "0.8.3"
 hmac = "0.12.1"
 ethereum-types = "0.14.1"

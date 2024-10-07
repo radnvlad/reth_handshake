@@ -4,6 +4,7 @@ use hmac::{Hmac, Mac};
 use log::debug;
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use sha2::{Digest, Sha256};
+use sha3::Keccak256;
 use tokio_util::bytes::{Bytes, BytesMut};
 
 use crate::rplx::Aes128Ctr64BE;
@@ -12,7 +13,11 @@ use crate::rplx::Aes128Ctr64BE;
 pub struct Ecies {
     our_private_key: SecretKey,
     peer_public_key: PublicKey,
-    nonce: H256,
+    ephemeral_priv_key: Option<SecretKey>,
+    ephemeral_remote_pub_key: Option<PublicKey>,
+    init_nonce: H256,
+    resp_nonce: H256,
+
 }
 
 impl Ecies {
@@ -31,7 +36,10 @@ impl Ecies {
             // shared_key,
             our_private_key,
             peer_public_key,
-            nonce: H256::random(),
+            ephemeral_priv_key: None,
+            ephemeral_remote_pub_key: None,
+            init_nonce: H256::random(),
+            resp_nonce: H256::random(), 
             // auth: None,
             // auth_response: None,
         }
@@ -39,6 +47,10 @@ impl Ecies {
 
     pub fn generate_random_secret_key() -> SecretKey {
         return SecretKey::new(&mut secp256k1::rand::thread_rng());
+    }
+
+    pub fn get_nonce(&self ) -> H256 {
+        self.init_nonce
     }
 
     pub fn derive_shared_secret_key(public_key: PublicKey, private_key: SecretKey) -> H256 {
@@ -171,4 +183,50 @@ impl Ecies {
 
         Ok(encrypted_data)
     }
+
+    fn keccak256_hash(inputs: &[&[u8]]) -> H256{
+        let mut hasher = Keccak256::new();
+
+        for input in inputs {
+            hasher.update(input)
+        }
+
+        H256::from(hasher.finalize().as_ref())
+    }
+
+    fn get_secrets(&self ) {
+
+        // Generate the secrets list obtained after the ECIES handshake took place, 
+        // Inputs: 
+        //  - privkey
+        //  - remote-pubk
+        //  - ephemeral-privkey
+        //  - remote-ephemeral-pubkey
+        //  - nonce
+        //  - initiator-nonce
+        // For the MAC  we have inputs : 
+        //  - mac-secret (we get theat above)
+        //  - recipient-nonce
+        //  - initiator-nonce
+        //  - auth
+        //  - ack
+
+
+        let static_shared_secret = Self::derive_shared_secret_key(self.peer_public_key,  self.our_private_key);
+
+        let ephemeral_key = Self::derive_shared_secret_key(self.ephemeral_remote_pub_key.unwrap(),self.ephemeral_priv_key.unwrap());
+
+        let shared_secret = Self::keccak256_hash(&[ephemeral_key.as_bytes(), Self::keccak256_hash(&[self.resp_nonce.as_bytes(), self.init_nonce.as_bytes()]).as_bytes()]);
+
+        let aes_secret = Self::keccak256_hash(&[ephemeral_key.as_bytes(), shared_secret.as_bytes()]);
+
+        let mac_secret = Self::keccak256_hash(&[ephemeral_key.as_bytes(), aes_secret.as_bytes()]);
+
+        debug!("static_shared_secret is: {:?}", static_shared_secret.as_bytes());
+        debug!("ephemeral_key is: {:?}", ephemeral_key.as_bytes());
+        debug!("shared_secret is: {:?}", shared_secret.as_bytes());
+        debug!("aes_secret is: {:?}", aes_secret.as_bytes());
+        debug!("mac_secret is: {:?}", mac_secret.as_bytes());
+    }
+
 }

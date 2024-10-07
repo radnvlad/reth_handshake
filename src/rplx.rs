@@ -62,7 +62,7 @@ impl RLPx {
         let private_ephemeral_key = Ecies::generate_random_secret_key();
 
         // Generate random initiator nonce.
-        let nonce = H256::random();
+        let nonce = self.ecies.get_nonce();
 
         let msg = derived_shared_key ^ nonce;
 
