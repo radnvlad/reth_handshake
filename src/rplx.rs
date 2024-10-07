@@ -44,7 +44,7 @@ const PROTOCOL_VERSION: usize = 5;
 const ZERO_HEADER: &[u8; 3] = &[194, 128, 128]; // Hex{0xC2, 0x80, 0x80} -> u8 &[194, 128, 128]
 
 impl RLPx {
-    pub fn new(our_private_key: SecretKey, peer_public_key: PublicKey,) -> Self {
+    pub fn new(our_private_key: SecretKey, peer_public_key: PublicKey) -> Self {
         Self {
             rlpx_state: RlpxState::WaitingConnection,
             direction: RlpxDirection::Outgoing,
@@ -53,11 +53,7 @@ impl RLPx {
         }
     }
 
-    pub fn construct_auth_request(
-        &mut self,
-        derived_shared_key: H256,
-        our_public_key: PublicKey,
-    ) {
+    pub fn construct_auth_request(&mut self, derived_shared_key: H256, our_public_key: PublicKey) {
         // Generate random keypair to for ECDH.
         let private_ephemeral_key = self.ecies.get_private_ephemeral_key();
 
@@ -90,7 +86,8 @@ impl RLPx {
 
         self.auth_request.clear();
 
-        self.auth_request.extend_from_slice(&self.ecies.encrypt(stream.out()).unwrap());
+        self.auth_request
+            .extend_from_slice(&self.ecies.encrypt(stream.out()).unwrap());
     }
 
     pub fn get_auth_request(&self) -> BytesMut {
@@ -147,11 +144,14 @@ impl Decoder for RLPx {
         if src.is_empty() {
             return Ok(None);
         }
-        let decrypted = self.ecies.decrypt(src).map_err(|e| {debug!("Frame decrypt Error {:?}", e)});
+        let decrypted = self
+            .ecies
+            .decrypt(src)
+            .map_err(|e| debug!("Frame decrypt Error {:?}", e));
 
         self.ecies.get_secrets();
         // let decrypted_xx =  self.ecies.decrypt_xx(src).map_err(|e| {debug!("Frame decrypt Error {:?}", e)});
-        // match 
+        // match
         // debug!("In Decode, state is {:?}", self.state);
 
         // match self.state {
