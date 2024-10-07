@@ -18,31 +18,26 @@ pub struct Ecies {
     ephemeral_remote_pub_key: Option<PublicKey>,
     init_nonce: H256,
     resp_nonce: H256,
+}
 
+pub struct HandshakeSecrets {
+    static_shared_secret: H256,
+    ephemeral_key: H256,
+    shared_secret: H256,
+    aes_secret: H256,
+    mac_secret: H256,
 }
 
 impl Ecies {
     pub fn new(our_private_key: SecretKey, peer_public_key:PublicKey) -> Self {
-        // let private_ephemeral_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
-        // let public_key = PublicKey::from_secret_key(SECP256K1, &private_key);
-        // let shared_key = H256::from_slice(
-        //     &secp256k1::ecdh::shared_secret_point(&remote_public_key, &private_key)[..32],
-        // );
 
         Self {
-            // private_key,
-            // private_ephemeral_key,
-            // public_key,
-            // remote_public_key,
-            // shared_key,
             our_private_key,
             peer_public_key,
             ephemeral_priv_key: Self::generate_random_secret_key(),
             ephemeral_remote_pub_key: None,
             init_nonce: H256::random(),
             resp_nonce: H256::random(), 
-            // auth: None,
-            // auth_response: None,
         }
     }
 
@@ -216,21 +211,29 @@ impl Ecies {
     }
 
     pub fn get_secrets(&self ) {
-
         // Generate the secrets list obtained after the ECIES handshake took place, 
         // Inputs: 
         //  - privkey
         //  - remote-pubk
         //  - ephemeral-privkey
         //  - remote-ephemeral-pubkey
-        //  - nonce
+        //  - recipient-nonce
         //  - initiator-nonce
+        // Outputs: 
+        //   - static-shared-secret = ecdh.agree(privkey, remote-pubk)
+        //   -ephemeral-key = ecdh.agree(ephemeral-privkey, remote-ephemeral-pubk)
+        //   -shared-secret = keccak256(ephemeral-key || keccak256(nonce || initiator-nonce))
+        //   -aes-secret = keccak256(ephemeral-key || shared-secret)
+        //   -mac-secret = keccak256(ephemeral-key || aes-secret)
         // For the MAC  we have inputs : 
         //  - mac-secret (we get theat above)
         //  - recipient-nonce
         //  - initiator-nonce
         //  - auth
         //  - ack
+        // Outpus: 
+        //  - egress-mac = keccak256.init((mac-secret ^ recipient-nonce) || auth)
+        //  - ingress-mac = keccak256.init((mac-secret ^ initiator-nonce) || ack)
 
 
         let static_shared_secret = Self::derive_shared_secret_key(self.peer_public_key,  self.our_private_key);
