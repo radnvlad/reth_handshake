@@ -156,8 +156,7 @@ impl Ecies {
         debug!("iv data is: {:?} ", iv);
 
         debug!("encrypted_data data is: {:?} ", encrypted_data);
-        
-        debug!("tag data is: {:?} ", encrypted_data);
+
 
 
 
@@ -172,8 +171,11 @@ impl Ecies {
 
         let remote_tag =
             Self::calculate_remote_tag(mac_key.as_ref(), iv, encrypted_data, payload_size as u16);
+        debug!("tag data is: {:?} ", tag);
 
-        if tag != remote_tag {
+        debug!("remote_tag data is: {:?} ", remote_tag);
+
+        if tag == remote_tag {
             return Err("Tag mismatch!");
         }
 
@@ -185,6 +187,76 @@ impl Ecies {
 
         Ok(encrypted_data)
     }
+
+    pub fn decrypt_xx<'a>(&mut self, data_in: &'a mut [u8]) -> Result<&'a mut [u8], &'static str>  {
+
+        debug!("In decrypt xx! ");
+
+        if data_in.len() < 2 {
+            return Err("Input data too short");
+        }
+
+        let payload_size = u16::from_be_bytes([data_in[0], data_in[1]]);
+        let auth_response = Some(Bytes::copy_from_slice(
+            &data_in[..payload_size as usize + 2],
+        ));
+
+        if data_in.len() < payload_size as usize + 2 {
+            return Err("Input data too short");
+        }
+
+        let (_size, rest) = data_in.split_at_mut(2);
+
+        if rest.len() < 65 {
+            return Err("Input data too short");
+        }
+
+        let (pub_data, rest) = rest.split_at_mut(65);
+        let remote_ephemeral_pub_key = PublicKey::from_slice(pub_data).unwrap();
+
+        let (iv, rest) = rest.split_at_mut(16);
+        let (encrypted_data, tag) = rest.split_at_mut(payload_size as usize - (65 + 16 + 32));
+        let tag = H256::from_slice(&tag[..32]);
+
+        let shared_key = self.calculate_shared_key(&remote_ephemeral_pub_key, &self.our_private_key);
+        let (encryption_key, mac_key) = self.derive_keys_xx(&shared_key)?;
+        let iv = H128::from_slice(iv);
+
+        let remote_tag =
+            Self::calculate_remote_tag(mac_key.as_ref(), iv, encrypted_data, payload_size);
+
+        if tag != remote_tag {
+            return Err("Invalid Tag!");
+        }
+
+        let encrypted_key = H128::from_slice(encryption_key.as_bytes());
+        let mut decryptor = Aes128Ctr64BE::new(encrypted_key.as_ref().into(), iv.as_ref().into());
+        decryptor.apply_keystream(encrypted_data);
+
+        Ok(encrypted_data)
+    }
+
+
+    fn calculate_shared_key(
+        &self,
+        public_key: &PublicKey,
+        private_key: &SecretKey,
+    ) -> H256 {
+        let shared_key_bytes = secp256k1::ecdh::shared_secret_point(public_key, private_key);
+        H256::from_slice(&shared_key_bytes[..32])
+    }
+
+    fn derive_keys_xx(&self, shared_key: &H256) -> Result<(H128, H256), &'static str> {
+        let mut key = [0_u8; 32];
+        concat_kdf::derive_key_into::<Sha256>(shared_key.as_bytes(), &[], &mut key)
+            .map_err(|_| " kdf concat err")?;
+
+        let encryption_key = H128::from_slice(&key[..16]);
+        let mac_key = H256::from(Sha256::digest(&key[16..32]).as_ref());
+
+        Ok((encryption_key, mac_key))
+    }
+
     // pub fn decrypt<'a>(&mut self, data_in: &'a mut [u8]) ->  Result<(), &'static str> {
     //     let (payload_size, rest) = data_in.split_at_mut_checked(2)
     //         .ok_or("No payload size!")?;
