@@ -13,7 +13,7 @@ use crate::rplx::Aes128Ctr64BE;
 pub struct Ecies {
     our_private_key: SecretKey,
     peer_public_key: PublicKey,
-    ephemeral_priv_key: Option<SecretKey>,
+    ephemeral_priv_key: SecretKey,
     ephemeral_remote_pub_key: Option<PublicKey>,
     init_nonce: H256,
     resp_nonce: H256,
@@ -36,7 +36,7 @@ impl Ecies {
             // shared_key,
             our_private_key,
             peer_public_key,
-            ephemeral_priv_key: None,
+            ephemeral_priv_key: Self::generate_random_secret_key(),
             ephemeral_remote_pub_key: None,
             init_nonce: H256::random(),
             resp_nonce: H256::random(), 
@@ -47,6 +47,10 @@ impl Ecies {
 
     pub fn generate_random_secret_key() -> SecretKey {
         return SecretKey::new(&mut secp256k1::rand::thread_rng());
+    }
+
+    pub fn get_private_ephemeral_key(&self) -> SecretKey {
+        self.ephemeral_priv_key
     }
 
     pub fn get_nonce(&self ) -> H256 {
@@ -161,11 +165,11 @@ impl Ecies {
         let (encrypted_data, tag) = rest.split_at_mut_checked(payload_size - (PUBLIC_KEY_SIZE + IV_SIZE + TAG_SIZE))
         .ok_or("Invalid tag field size! ")?;
 
-        let remote_ephemeral_pub_key = PublicKey::from_slice(pub_data).map_err(|_|"Key conversion failed ")?;
+        self.ephemeral_remote_pub_key = Some(PublicKey::from_slice(pub_data).map_err(|_|"Key conversion failed ")?);
 
         let tag = H256::from_slice(&tag[..32]);
 
-        let shared_key = Self::derive_shared_secret_key(remote_ephemeral_pub_key, self.our_private_key);
+        let shared_key = Self::derive_shared_secret_key(self.ephemeral_remote_pub_key.unwrap(), self.our_private_key);
 
         let (encryption_key, mac_key) = Self::derive_keys(&shared_key)?;
         let iv = H128::from_slice(iv);
@@ -194,7 +198,7 @@ impl Ecies {
         H256::from(hasher.finalize().as_ref())
     }
 
-    fn get_secrets(&self ) {
+    pub fn get_secrets(&self ) {
 
         // Generate the secrets list obtained after the ECIES handshake took place, 
         // Inputs: 
@@ -214,7 +218,7 @@ impl Ecies {
 
         let static_shared_secret = Self::derive_shared_secret_key(self.peer_public_key,  self.our_private_key);
 
-        let ephemeral_key = Self::derive_shared_secret_key(self.ephemeral_remote_pub_key.unwrap(),self.ephemeral_priv_key.unwrap());
+        let ephemeral_key = Self::derive_shared_secret_key(self.ephemeral_remote_pub_key.unwrap(),self.ephemeral_priv_key);
 
         let shared_secret = Self::keccak256_hash(&[ephemeral_key.as_bytes(), Self::keccak256_hash(&[self.resp_nonce.as_bytes(), self.init_nonce.as_bytes()]).as_bytes()]);
 

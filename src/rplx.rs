@@ -59,7 +59,7 @@ impl RLPx {
         our_public_key: PublicKey,
     ) {
         // Generate random keypair to for ECDH.
-        let private_ephemeral_key = Ecies::generate_random_secret_key();
+        let private_ephemeral_key = self.ecies.get_private_ephemeral_key();
 
         // Generate random initiator nonce.
         let nonce = self.ecies.get_nonce();
@@ -147,6 +147,7 @@ impl Decoder for RLPx {
         }
         let decrypted = self.ecies.decrypt(src).map_err(|e| {debug!("Frame decrypt Error {:?}", e)});
 
+        self.ecies.get_secrets();
         // let decrypted_xx =  self.ecies.decrypt_xx(src).map_err(|e| {debug!("Frame decrypt Error {:?}", e)});
         // match 
         // debug!("In Decode, state is {:?}", self.state);
