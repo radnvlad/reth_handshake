@@ -88,7 +88,9 @@ impl RLPx {
         // auth-vsn = 4
         stream.append(&PROTOCOL_VERSION);
 
-        self.ecies.encrypt(stream.out(), &mut self.auth_request);
+        self.auth_request.clear();
+
+        self.auth_request.extend_from_slice(&self.ecies.encrypt(stream.out()).unwrap());
     }
 
     pub fn get_auth_request(&self) -> BytesMut {
