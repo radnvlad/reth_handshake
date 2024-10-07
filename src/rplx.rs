@@ -145,7 +145,7 @@ impl Decoder for RLPx {
         if src.is_empty() {
             return Ok(None);
         }
-        let decrypted = self.ecies.decrypt(src).map_err(|e| {debug!("Frame send Error {:?}", e)});
+        let decrypted = self.ecies.decrypt(src).map_err(|e| {debug!("Frame decrypt Error {:?}", e)});
 
 
         // match 

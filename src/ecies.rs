@@ -132,7 +132,7 @@ impl Ecies {
 
         debug!("Raw Encrypted data is: {:?} ", data_in);
 
-
+        // Payload size.
         let (payload_size, rest) = data_in.split_at_mut_checked(2)
             .ok_or("No payload size!")?;
 
@@ -150,6 +150,16 @@ impl Ecies {
 
         let (encrypted_data, tag) = rest.split_at_mut_checked(payload_size - (PUBLIC_KEY_SIZE + IV_SIZE + TAG_SIZE))
         .ok_or("Invalid tag field size! ")?;
+
+        debug!("pub_data data is: {:?} ", pub_data);
+
+        debug!("iv data is: {:?} ", iv);
+
+        debug!("encrypted_data data is: {:?} ", encrypted_data);
+        
+        debug!("tag data is: {:?} ", encrypted_data);
+
+
 
         let remote_ephemeral_pub_key = PublicKey::from_slice(pub_data).map_err(|_|"Key conversion failed ")?;
 
