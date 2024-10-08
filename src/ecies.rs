@@ -1,6 +1,7 @@
 use std::net::Incoming;
 
-use aes::cipher::{KeyIvInit, StreamCipher};
+use aes::cipher::{KeyInit, KeyIvInit, StreamCipher};
+use aes::Aes256;
 use ethereum_types::{H128, H256};
 use hmac::{Hmac, Mac};
 use log::debug;
@@ -32,15 +33,15 @@ pub struct ECIES {
     ack: BytesMut,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug, Clone )]
 pub struct HandshakeSecrets {
     pub static_shared_secret: H256,
     pub ephemeral_key: H256,
     pub shared_secret: H256,
-    pub aes_secret: H256,
-    pub mac_secret: H256,
-    pub ingress_mac: H256,
-    pub egress_mac: H256,
+    pub aes_secret: Aes256,
+    pub mac_secret: Aes256,
+    pub ingress_mac: Keccak256,
+    pub egress_mac: Keccak256,
 }
 
 const PUBLIC_KEY_SIZE: usize = 65;
@@ -317,7 +318,6 @@ impl ECIES {
 
 
 
-
         // debug!("ack is: {:?}", self.ack.as_ref());
         // debug!("Auth is: {:?}", self.auth.as_ref());
 
@@ -337,14 +337,21 @@ impl ECIES {
         // debug!("mac_secret is: {:?}", mac_secret.as_bytes());
         // debug!("resp_nonce is: {:?}", self.resp_nonce.as_bytes());
         // debug!("init_nonce is: {:?}", self.init_nonce.as_bytes());
+
+
+        let mut ingress_mac_hasher = Keccak256::new();
+        ingress_mac_hasher.update(ingress_mac);
+        let mut egress_mac_hasher = Keccak256::new();
+        egress_mac_hasher.update(ingress_mac);
+
         HandshakeSecrets {
             static_shared_secret,
             ephemeral_key,
             shared_secret,
-            aes_secret,
-            mac_secret,
-            ingress_mac,
-            egress_mac,
+            aes_secret: Aes256::new(aes_secret.as_ref().into()),
+            mac_secret: Aes256::new(mac_secret.as_ref().into()),
+            ingress_mac: ingress_mac_hasher,
+            egress_mac: egress_mac_hasher,
         }
     }
 }

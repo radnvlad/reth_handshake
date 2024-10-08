@@ -39,7 +39,7 @@ pub struct RLPx {
 }
 
 const PROTOCOL_VERSION: usize = 5;
-const ZERO_HEADER: &[u8; 3] = &[194, 128, 128]; // Hex{0xC2, 0x80, 0x80} -> u8 &[194, 128, 128]
+const ZERO_HEADER: &[u8; 16] = &[0, 0, 148, 194, 128, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // Lifted from geth
 
 impl RLPx {
     pub fn new(our_private_key: SecretKey, peer_public_key: PublicKey) -> Self {
@@ -90,10 +90,18 @@ impl RLPx {
     }
 
     pub fn hash_digest(mac: &H256) -> H128 {
-        let mut ingress_mac: Keccak256 = Keccak256::new();
-        ingress_mac.update(mac);
+        let mut hasher: Keccak256 = Keccak256::new();
+        hasher.update(mac);
 
-        H128::from_slice(&ingress_mac.finalize()[0..16])
+        H128::from_slice(&hasher.finalize()[0..16])
+    }
+
+    pub fn hash_update(hash: &H256, data: &[u8]) -> H256 {
+        let mut hasher: Keccak256 = Keccak256::new();
+        hasher.update(hash);
+        hasher.update(data);
+        H256::from_slice(hasher.finalize())
+        // H128::from_slice(&hasher.finalize()[0..16])
     }
 
     pub fn aes_encrypt(aes_key: &H256, data: &mut [u8]) {
@@ -107,41 +115,73 @@ impl RLPx {
         cipher.decrypt_block(GenericArray::from_mut_slice(data));
     }
 
-    pub fn encode_frame<'a>(&mut self, data_in: &'a mut [u8]) -> Result<&'a mut [u8], &'static str> {
-        const FRAME_HEADER_CIPHERTEXT_SIZE: usize = 16;
-        const FRAME_HEADER_MAC_SIZE: usize = 16;
+    fn write_frame(&mut self, data: &[u8]) -> BytesMut {
 
         // frame = header-ciphertext || header-mac || frame-ciphertext || frame-mac
-        let (header_ciphertext, rest) = data_in
-        .split_at_mut_checked(FRAME_HEADER_CIPHERTEXT_SIZE)
-        .ok_or("No header ciphertext! ")?;
+        // header = frame-size || header-data || header-padding
+        // header-data = [capability-id, context-id]
 
-        let (header_mac, mac) = rest
-        .split_at_mut_checked(FRAME_HEADER_MAC_SIZE)
-        .ok_or("No header MAC ")?;
-
-        let (frame_ciphertext, frame_mac) = rest
-        .split_at_mut_checked((rest.len() - FRAME_HEADER_MAC_SIZE))
-        .ok_or("No frame MAC ")?;
-
-        let digest = Self::hash_digest(&self.secrets.unwrap().ingress_mac);
-
-        debug!("Header encrypted is: {:?}", header_ciphertext);
-
-        Self::aes_decrypt(&self.secrets.unwrap().aes_secret, header_ciphertext);
-
-        debug!("Header decrypted is: {:?}", header_ciphertext);
-        // self.compare_update_ingress_header_mac(header_ciphertext, header_mac);       
-
-        // self.secrets.unwrap().ingress_mac.compute_header(header_ciphertext);
-        // if header_mac != self.secrets.unwrap().ingress_mac.digest() {
-        //     return Err(Error::InvalidMac(mac));
-        // }
-
-        // TODO: Check MAC here,
+        // header = frame-size || header-data || header-padding
+        let mut header_buf = BytesMut::new();
+        header_buf.extend_from_slice(ZERO_HEADER);
 
 
-        Err("NotImpl")
+        let secrets = self.secrets.unwrap();
+
+        // header-ciphertext = aes(aes-secret, header)
+        secrets.aes_secret.encrypt_block(GenericArray::from_mut_slice(header_buf.as_mut()));
+        // header-mac-seed = aes(mac-secret, keccak256.digest(egress-mac)[:16]) ^ header-ciphertext
+        let egress_mac_digest = &secrets.egress_mac.clone().finalize()[..16];
+        secrets.mac_secret.encrypt_block(GenericArray::from_mut_slice(egress_mac_digest.as_mut()));
+        let header_mac_seed: [u8; 16];
+        for i in 0..header_mac_seed.len() {
+            header_mac_seed[i] = egress_mac_digest[i] ^ header_buf[i];
+        }
+
+        // egress-mac = keccak256.update(egress-mac, header-mac-seed)
+        // header-mac = keccak256.digest(egress-mac)[:16]
+        secrets.egress_mac.update(header_mac_seed);
+        let header_mac = &secrets.egress_mac.clone().finalize()[..16];
+
+
+        let mut out = BytesMut::default();
+        out.reserve(32);
+        out.extend_from_slice(&header_buf);
+        out.extend_from_slice(header_mac);
+
+        let mut len = data.len();
+        if len % 16 > 0 {
+            len = (len / 16 + 1) * 16;
+        }
+
+        let old_len = out.len();
+        out.resize(old_len + len, 0);
+
+        let encrypted = &mut out[old_len..old_len + len];
+        encrypted[..data.len()].copy_from_slice(data);
+
+        //frame-ciphertext = aes(aes-secret, frame-data || frame-padding)
+        secrets.aes_secret.encrypt_block(GenericArray::from_mut_slice(encrypted.as_mut()));
+        // egress-mac = keccak256.update(egress-mac, frame-ciphertext)
+        secrets.egress_mac.update(encrypted);
+        // frame-mac-seed = aes(mac-secret, keccak256.digest(egress-mac)[:16]) ^ keccak256.digest(egress-mac)[:16]
+        let egress_mac_digest = &secrets.egress_mac.clone().finalize()[..16];
+        let mut egress_mac_aes =  egress_mac_digest.clone();
+        secrets.aes_secret.encrypt_block(GenericArray::from_mut_slice(egress_mac_aes));
+        let frame_mac_seed: [u8; 16];
+        for i in 0..frame_mac_seed.len() {
+            frame_mac_seed[i] = egress_mac_aes[i] ^ egress_mac_digest[i];
+        }
+
+        // egress-mac = keccak256.update(egress-mac, frame-mac-seed)
+        secrets.egress_mac.update(frame_mac_seed);
+
+        // frame-mac = keccak256.digest(egress-mac)[:16]
+        let frame_mac = &secrets.egress_mac.clone().finalize()[..16];
+
+        out.extend_from_slice(frame_mac);
+
+        out
     }
 
 
@@ -149,34 +189,34 @@ impl RLPx {
         const FRAME_HEADER_CIPHERTEXT_SIZE: usize = 16;
         const FRAME_HEADER_MAC_SIZE: usize = 16;
 
-        // frame = header-ciphertext || header-mac || frame-ciphertext || frame-mac
-        let (header_ciphertext, rest) = data_in
-        .split_at_mut_checked(FRAME_HEADER_CIPHERTEXT_SIZE)
-        .ok_or("No header ciphertext! ")?;
+        // // frame = header-ciphertext || header-mac || frame-ciphertext || frame-mac
+        // let (header_ciphertext, rest) = data_in
+        // .split_at_mut_checked(FRAME_HEADER_CIPHERTEXT_SIZE)
+        // .ok_or("No header ciphertext! ")?;
 
-        let (header_mac, mac) = rest
-        .split_at_mut_checked(FRAME_HEADER_MAC_SIZE)
-        .ok_or("No header MAC ")?;
+        // let (header_mac, mac) = rest
+        // .split_at_mut_checked(FRAME_HEADER_MAC_SIZE)
+        // .ok_or("No header MAC ")?;
 
-        let (frame_ciphertext, frame_mac) = rest
-        .split_at_mut_checked((rest.len() - FRAME_HEADER_MAC_SIZE))
-        .ok_or("No frame MAC ")?;
+        // let (frame_ciphertext, frame_mac) = rest
+        // .split_at_mut_checked((rest.len() - FRAME_HEADER_MAC_SIZE))
+        // .ok_or("No frame MAC ")?;
 
-        let digest = Self::hash_digest(&self.secrets.unwrap().ingress_mac);
+        // let digest = Self::hash_digest(&self.secrets.unwrap().ingress_mac);
 
-        debug!("Header encrypted is: {:?}", header_ciphertext);
+        // debug!("Header encrypted is: {:?}", header_ciphertext);
 
-        Self::aes_decrypt(&self.secrets.unwrap().aes_secret, header_ciphertext);
+        // Self::aes_decrypt(&self.secrets.unwrap().aes_secret, header_ciphertext);
 
-        debug!("Header decrypted is: {:?}", header_ciphertext);
-        // self.compare_update_ingress_header_mac(header_ciphertext, header_mac);       
+        // debug!("Header decrypted is: {:?}", header_ciphertext);
+        // // self.compare_update_ingress_header_mac(header_ciphertext, header_mac);       
 
-        // self.secrets.unwrap().ingress_mac.compute_header(header_ciphertext);
-        // if header_mac != self.secrets.unwrap().ingress_mac.digest() {
-        //     return Err(Error::InvalidMac(mac));
-        // }
+        // // self.secrets.unwrap().ingress_mac.compute_header(header_ciphertext);
+        // // if header_mac != self.secrets.unwrap().ingress_mac.digest() {
+        // //     return Err(Error::InvalidMac(mac));
+        // // }
 
-        // TODO: Check MAC here,
+        // // TODO: Check MAC here,
 
 
         Err("NotImpl")
