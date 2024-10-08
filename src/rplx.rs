@@ -328,6 +328,6 @@ impl Decoder for RLPx {
         }
         debug!("Exiting decode!! ");
 
-        Ok(None)
+        Ok(Some(RLPx_Message::AuthAck))
     }
 }
