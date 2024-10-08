@@ -32,14 +32,15 @@ pub struct ECIES {
     ack: BytesMut,
 }
 
-
+#[derive(Clone, Copy, Debug)]
 pub struct HandshakeSecrets {
-    static_shared_secret: H256,
-    ephemeral_key: H256,
-    shared_secret: H256,
-    aes_secret: H256,
-    mac_secret: H256,
-    
+    pub static_shared_secret: H256,
+    pub ephemeral_key: H256,
+    pub shared_secret: H256,
+    pub aes_secret: H256,
+    pub mac_secret: H256,
+    pub ingress_mac: H256,
+    pub egress_mac: H256,
 }
 
 const PUBLIC_KEY_SIZE: usize = 65;
@@ -251,7 +252,7 @@ impl ECIES {
         H256::from(hasher.finalize().as_ref())
     }
 
-    pub fn get_secrets(&self) {
+    pub fn get_secrets(&self) -> HandshakeSecrets{
         // Generate the secrets list obtained after the ECIES handshake took place,
         // Inputs:
         //  - privkey
@@ -276,6 +277,7 @@ impl ECIES {
         // Outpus:
         //  - egress-mac = keccak256.init((mac-secret ^ recipient-nonce) || auth)
         //  - ingress-mac = keccak256.init((mac-secret ^ initiator-nonce) || ack)
+
 
         let static_shared_secret = Self::agree(self.peer_public_key, self.our_private_key);
 
@@ -314,8 +316,10 @@ impl ECIES {
         }
 
 
-        debug!("ack is: {:?}", self.ack.as_ref());
-        debug!("Auth is: {:?}", self.auth.as_ref());
+
+
+        // debug!("ack is: {:?}", self.ack.as_ref());
+        // debug!("Auth is: {:?}", self.auth.as_ref());
 
 
         // debug!(
@@ -333,5 +337,14 @@ impl ECIES {
         // debug!("mac_secret is: {:?}", mac_secret.as_bytes());
         // debug!("resp_nonce is: {:?}", self.resp_nonce.as_bytes());
         // debug!("init_nonce is: {:?}", self.init_nonce.as_bytes());
+        HandshakeSecrets {
+            static_shared_secret,
+            ephemeral_key,
+            shared_secret,
+            aes_secret,
+            mac_secret,
+            ingress_mac,
+            egress_mac,
+        }
     }
 }

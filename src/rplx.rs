@@ -1,8 +1,9 @@
 use crate::{
     // error::Error,
-    ecies::{ECIESDirection, ECIES},
+    ecies::{ECIESDirection, HandshakeSecrets, ECIES},
     messages::{Disconnect, Hello, Ping, Pong, RLPx_Message, Status},
 };
+use aes::cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt, KeyInit};
 use alloy_rlp::{Buf, BytesMut};
 use ctr::cipher::KeyIvInit;
 use ctr::cipher::StreamCipher;
@@ -12,6 +13,7 @@ use log::{debug, error, info, warn};
 use rlp::RlpStream;
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use sha2::{Digest, Sha256};
+use sha3::Keccak256;
 use snap::raw::Decoder as SnapDecoder;
 use tokio_util::codec::{Decoder, Encoder};
 pub type Aes128Ctr64BE = ctr::Ctr64BE<aes::Aes128>;
@@ -33,6 +35,7 @@ pub struct RLPx {
     direction: ECIESDirection,
     auth_request: BytesMut,
     ecies: ECIES,
+    secrets: Option<HandshakeSecrets>,
 }
 
 const PROTOCOL_VERSION: usize = 5;
@@ -45,6 +48,7 @@ impl RLPx {
             direction: ECIESDirection::Outgoing,
             auth_request: BytesMut::new(), // todo
             ecies: ECIES::new(our_private_key, peer_public_key),
+            secrets: None,
         }
     }
 
@@ -85,6 +89,98 @@ impl RLPx {
             .extend_from_slice(&self.ecies.encrypt(stream.out()).unwrap());
     }
 
+    pub fn hash_digest(mac: &H256) -> H128 {
+        let mut ingress_mac: Keccak256 = Keccak256::new();
+        ingress_mac.update(mac);
+
+        H128::from_slice(&ingress_mac.finalize()[0..16])
+    }
+
+    pub fn aes_encrypt(aes_key: &H256, data: &mut [u8]) {
+        let cipher = aes::Aes256::new(aes_key.as_ref().into());
+        cipher.encrypt_block(GenericArray::from_mut_slice(data));
+    }
+
+
+    pub fn aes_decrypt(aes_key: &H256, data: &mut [u8]) {
+        let cipher = aes::Aes256::new(aes_key.as_ref().into());
+        cipher.decrypt_block(GenericArray::from_mut_slice(data));
+    }
+
+    pub fn encode_frame<'a>(&mut self, data_in: &'a mut [u8]) -> Result<&'a mut [u8], &'static str> {
+        const FRAME_HEADER_CIPHERTEXT_SIZE: usize = 16;
+        const FRAME_HEADER_MAC_SIZE: usize = 16;
+
+        // frame = header-ciphertext || header-mac || frame-ciphertext || frame-mac
+        let (header_ciphertext, rest) = data_in
+        .split_at_mut_checked(FRAME_HEADER_CIPHERTEXT_SIZE)
+        .ok_or("No header ciphertext! ")?;
+
+        let (header_mac, mac) = rest
+        .split_at_mut_checked(FRAME_HEADER_MAC_SIZE)
+        .ok_or("No header MAC ")?;
+
+        let (frame_ciphertext, frame_mac) = rest
+        .split_at_mut_checked((rest.len() - FRAME_HEADER_MAC_SIZE))
+        .ok_or("No frame MAC ")?;
+
+        let digest = Self::hash_digest(&self.secrets.unwrap().ingress_mac);
+
+        debug!("Header encrypted is: {:?}", header_ciphertext);
+
+        Self::aes_decrypt(&self.secrets.unwrap().aes_secret, header_ciphertext);
+
+        debug!("Header decrypted is: {:?}", header_ciphertext);
+        // self.compare_update_ingress_header_mac(header_ciphertext, header_mac);       
+
+        // self.secrets.unwrap().ingress_mac.compute_header(header_ciphertext);
+        // if header_mac != self.secrets.unwrap().ingress_mac.digest() {
+        //     return Err(Error::InvalidMac(mac));
+        // }
+
+        // TODO: Check MAC here,
+
+
+        Err("NotImpl")
+    }
+
+
+    pub fn decode_frame<'a>(&mut self, data_in: &'a mut [u8]) -> Result<&'a mut [u8], &'static str> {
+        const FRAME_HEADER_CIPHERTEXT_SIZE: usize = 16;
+        const FRAME_HEADER_MAC_SIZE: usize = 16;
+
+        // frame = header-ciphertext || header-mac || frame-ciphertext || frame-mac
+        let (header_ciphertext, rest) = data_in
+        .split_at_mut_checked(FRAME_HEADER_CIPHERTEXT_SIZE)
+        .ok_or("No header ciphertext! ")?;
+
+        let (header_mac, mac) = rest
+        .split_at_mut_checked(FRAME_HEADER_MAC_SIZE)
+        .ok_or("No header MAC ")?;
+
+        let (frame_ciphertext, frame_mac) = rest
+        .split_at_mut_checked((rest.len() - FRAME_HEADER_MAC_SIZE))
+        .ok_or("No frame MAC ")?;
+
+        let digest = Self::hash_digest(&self.secrets.unwrap().ingress_mac);
+
+        debug!("Header encrypted is: {:?}", header_ciphertext);
+
+        Self::aes_decrypt(&self.secrets.unwrap().aes_secret, header_ciphertext);
+
+        debug!("Header decrypted is: {:?}", header_ciphertext);
+        // self.compare_update_ingress_header_mac(header_ciphertext, header_mac);       
+
+        // self.secrets.unwrap().ingress_mac.compute_header(header_ciphertext);
+        // if header_mac != self.secrets.unwrap().ingress_mac.digest() {
+        //     return Err(Error::InvalidMac(mac));
+        // }
+
+        // TODO: Check MAC here,
+
+
+        Err("NotImpl")
+    }
     pub fn get_auth_request(&self) -> BytesMut {
         self.auth_request.clone()
     }
@@ -136,6 +232,7 @@ impl Decoder for RLPx {
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         debug!("We're decoding!! ");
+        debug!("Raw data is {:?} ", src.as_mut());
 
         match self.rlpx_state {
 
@@ -151,11 +248,14 @@ impl Decoder for RLPx {
                     .decrypt(src)
                     .map_err(|e| debug!("Frame decrypt Error {:?}", e));
         
-                self.ecies.get_secrets();
+                self.secrets = Some(self.ecies.get_secrets());
                 self.rlpx_state = RlpxState::AuthAckRecieved;
             } 
             RlpxState::AuthAckRecieved => {
                 debug!("We're decoding frame!! ");
+                // debug!("Raw frame is {:?} ", src.as_mut());
+
+                self.decode_frame(src);
 
             }
             _ => return Ok(None)
