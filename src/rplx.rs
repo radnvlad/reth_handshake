@@ -1,7 +1,7 @@
 use crate::{
     // error::Error,
     ecies::{ECIESDirection, HandshakeSecrets, ECIES},
-    messages::{Disconnect, Hello, Ping, Pong, RLPx_Message, Status},
+    messages::{Capability, Disconnect, Hello, Ping, Pong, RLPx_Message, Status},
 };
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt, KeyInit};
 use alloy_rlp::{Buf, BytesMut};
@@ -17,6 +17,8 @@ use sha3::Keccak256;
 use snap::raw::Decoder as SnapDecoder;
 use tokio_util::codec::{Decoder, Encoder};
 pub type Aes128Ctr64BE = ctr::Ctr64BE<aes::Aes128>;
+use alloy_primitives::B512;
+
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RlpxState {
@@ -37,6 +39,7 @@ pub struct RLPx {
     ecies: ECIES,
     secrets: Option<HandshakeSecrets>,
 }
+
 
 const PROTOCOL_VERSION: usize = 5;
 const ZERO_HEADER: &[u8; 16] = &[0, 0, 148, 194, 128, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // Lifted from geth
@@ -96,14 +99,6 @@ impl RLPx {
         H128::from_slice(&hasher.finalize()[0..16])
     }
 
-    pub fn hash_update(hash: &H256, data: &[u8]) -> H256 {
-        let mut hasher: Keccak256 = Keccak256::new();
-        hasher.update(hash);
-        hasher.update(data);
-        H256::from_slice(hasher.finalize())
-        // H128::from_slice(&hasher.finalize()[0..16])
-    }
-
     pub fn aes_encrypt(aes_key: &H256, data: &mut [u8]) {
         let cipher = aes::Aes256::new(aes_key.as_ref().into());
         cipher.encrypt_block(GenericArray::from_mut_slice(data));
@@ -126,14 +121,16 @@ impl RLPx {
         header_buf.extend_from_slice(ZERO_HEADER);
 
 
-        let secrets = self.secrets.unwrap();
+        let secrets = self.secrets.as_mut().unwrap();
 
         // header-ciphertext = aes(aes-secret, header)
         secrets.aes_secret.encrypt_block(GenericArray::from_mut_slice(header_buf.as_mut()));
         // header-mac-seed = aes(mac-secret, keccak256.digest(egress-mac)[:16]) ^ header-ciphertext
-        let egress_mac_digest = &secrets.egress_mac.clone().finalize()[..16];
+        let egress_mac  = &secrets.egress_mac.clone().finalize();
+        let mut egress_mac_digest: [u8; 16] = [0;16];
+        egress_mac_digest.copy_from_slice(&egress_mac[..16]);
         secrets.mac_secret.encrypt_block(GenericArray::from_mut_slice(egress_mac_digest.as_mut()));
-        let header_mac_seed: [u8; 16];
+        let mut header_mac_seed: [u8; 16] = [0;16];
         for i in 0..header_mac_seed.len() {
             header_mac_seed[i] = egress_mac_digest[i] ^ header_buf[i];
         }
@@ -165,10 +162,12 @@ impl RLPx {
         // egress-mac = keccak256.update(egress-mac, frame-ciphertext)
         secrets.egress_mac.update(encrypted);
         // frame-mac-seed = aes(mac-secret, keccak256.digest(egress-mac)[:16]) ^ keccak256.digest(egress-mac)[:16]
-        let egress_mac_digest = &secrets.egress_mac.clone().finalize()[..16];
+        let egress_mac = &secrets.egress_mac.clone().finalize();
+        let mut egress_mac_digest: [u8; 16] = [0;16];
+        egress_mac_digest.copy_from_slice(&egress_mac[0..16]);
         let mut egress_mac_aes =  egress_mac_digest.clone();
-        secrets.aes_secret.encrypt_block(GenericArray::from_mut_slice(egress_mac_aes));
-        let frame_mac_seed: [u8; 16];
+        secrets.aes_secret.encrypt_block(GenericArray::from_mut_slice(&mut egress_mac_aes));
+        let mut frame_mac_seed: [u8; 16] = [0;16];
         for i in 0..frame_mac_seed.len() {
             frame_mac_seed[i] = egress_mac_aes[i] ^ egress_mac_digest[i];
         }
@@ -228,6 +227,25 @@ impl RLPx {
     pub fn get_state(&self) -> RlpxState {
         self.rlpx_state
     }
+
+    // pub fn hello_msg(&mut self) -> BytesMut {
+    //     let msg = Hello {
+    //         protocol_version: PROTOCOL_VERSION,
+    //         client_version: "Hello".to_string(),
+    //         capabilities: vec![Capability {
+    //             version: 68,
+    //             name: "eth".to_string(),
+    //         }],
+    //         port: 0,
+    //         id: *B512::from_slice(&self.ecies.public_key.serialize_uncompressed()[1..]),
+    //     };
+
+    //     let mut encoded_hello = BytesMut::default();
+    //     Hello::ID.encode(&mut encoded_hello);
+    //     msg.encode(&mut encoded_hello);
+
+    //     self.write_frame(&encoded_hello)
+    // }
 }
 
 impl Encoder<RLPx_Message> for RLPx {

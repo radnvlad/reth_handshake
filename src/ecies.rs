@@ -1,7 +1,4 @@
-use std::net::Incoming;
-
-use aes::cipher::{KeyInit, KeyIvInit, StreamCipher};
-use aes::Aes256;
+use aes::cipher::{KeyIvInit, StreamCipher};
 use ethereum_types::{H128, H256};
 use hmac::{Hmac, Mac};
 use log::debug;
@@ -38,8 +35,8 @@ pub struct HandshakeSecrets {
     pub static_shared_secret: H256,
     pub ephemeral_key: H256,
     pub shared_secret: H256,
-    pub aes_secret: Aes256,
-    pub mac_secret: Aes256,
+    pub aes_secret: aes::Aes256,
+    pub mac_secret: aes::Aes256,
     pub ingress_mac: Keccak256,
     pub egress_mac: Keccak256,
 }
@@ -348,8 +345,8 @@ impl ECIES {
             static_shared_secret,
             ephemeral_key,
             shared_secret,
-            aes_secret: Aes256::new(aes_secret.as_ref().into()),
-            mac_secret: Aes256::new(mac_secret.as_ref().into()),
+            aes_secret: <aes::Aes256 as aes::cipher::KeyInit>::new(aes_secret.as_ref().into()),
+            mac_secret: <aes::Aes256 as aes::cipher::KeyInit>::new(mac_secret.as_ref().into()),
             ingress_mac: ingress_mac_hasher,
             egress_mac: egress_mac_hasher,
         }
