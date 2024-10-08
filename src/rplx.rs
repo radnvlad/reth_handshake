@@ -4,7 +4,7 @@ use crate::{
     messages::{Capability, Disconnect, Hello, Ping, Pong, RLPx_Message, Status},
 };
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt, KeyInit};
-use alloy_rlp::{Buf, BytesMut};
+use alloy_rlp::{Buf, BytesMut, Encodable};
 use ctr::cipher::KeyIvInit;
 use ctr::cipher::StreamCipher;
 use ethereum_types::{H128, H256};
@@ -37,6 +37,7 @@ pub struct RLPx {
     direction: ECIESDirection,
     auth_request: BytesMut,
     ecies: ECIES,
+    public_key: PublicKey,
     secrets: Option<HandshakeSecrets>,
 }
 
@@ -46,11 +47,13 @@ const ZERO_HEADER: &[u8; 16] = &[0, 0, 148, 194, 128, 128, 0, 0, 0, 0, 0, 0, 0, 
 
 impl RLPx {
     pub fn new(our_private_key: SecretKey, peer_public_key: PublicKey) -> Self {
+        let public_key = PublicKey::from_secret_key(SECP256K1, &our_private_key);
         Self {
             rlpx_state: RlpxState::WaitingConnection,
             direction: ECIESDirection::Outgoing,
             auth_request: BytesMut::new(), // todo
             ecies: ECIES::new(our_private_key, peer_public_key),
+            public_key: public_key,
             secrets: None,
         }
     }
@@ -228,24 +231,24 @@ impl RLPx {
         self.rlpx_state
     }
 
-    // pub fn hello_msg(&mut self) -> BytesMut {
-    //     let msg = Hello {
-    //         protocol_version: PROTOCOL_VERSION,
-    //         client_version: "Hello".to_string(),
-    //         capabilities: vec![Capability {
-    //             version: 68,
-    //             name: "eth".to_string(),
-    //         }],
-    //         port: 0,
-    //         id: *B512::from_slice(&self.ecies.public_key.serialize_uncompressed()[1..]),
-    //     };
+    pub fn hello_msg(&mut self) -> BytesMut {
+        let msg = Hello {
+            protocol_version: PROTOCOL_VERSION,
+            client_version: "Hello".to_string(),
+            capabilities: vec![Capability {
+                version: 68,
+                name: "eth".to_string(),
+            }],
+            port: 0,
+            id: *B512::from_slice(&self.public_key.serialize_uncompressed()[1..]),
+        };
 
-    //     let mut encoded_hello = BytesMut::default();
-    //     Hello::ID.encode(&mut encoded_hello);
-    //     msg.encode(&mut encoded_hello);
+        let mut encoded_hello = BytesMut::default();
+        Hello::ID.encode(&mut encoded_hello);
+        msg.encode(&mut encoded_hello);
 
-    //     self.write_frame(&encoded_hello)
-    // }
+        self.write_frame(&encoded_hello)
+    }
 }
 
 impl Encoder<RLPx_Message> for RLPx {
@@ -264,6 +267,7 @@ impl Encoder<RLPx_Message> for RLPx {
                 todo!()
             }
             RLPx_Message::Hello => {
+                dst.extend_from_slice(&self.hello_msg());
                 todo!()
             }
             RLPx_Message::Disconnect(reason) => {
@@ -290,7 +294,7 @@ impl Decoder for RLPx {
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         debug!("We're decoding!! ");
-        debug!("Raw data is {:?} ", src.as_mut());
+        // debug!("Raw data is {:?} ", src.as_mut());
 
         match self.rlpx_state {
 
@@ -313,11 +317,17 @@ impl Decoder for RLPx {
                 debug!("We're decoding frame!! ");
                 // debug!("Raw frame is {:?} ", src.as_mut());
 
-                self.decode_frame(src);
+                // self.decode_frame(src);
 
             }
-            _ => return Ok(None)
+            _ => {
+                debug!("Invalid frame!! ");
+
+                return Ok(None)
+            }
         }
+        debug!("Exiting decode!! ");
+
         Ok(None)
     }
 }

@@ -1,9 +1,8 @@
 use ecies::ECIES;
-use ethereum_types::H256;
 use futures::executor::block_on;
 use futures::SinkExt;
 use futures::StreamExt;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use messages::RLPx_Message;
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use std::{
@@ -90,7 +89,7 @@ async fn multi_connection_runner(peers: Vec<(PublicKey, SocketAddr)>) {
     // let mut futures_list: Vec<impt> = Vec::new();
     for (public_key, ip_address) in peers {
         debug!("Peer public key is {:?}", public_key);
-        handle_session(private_key, public_key, ip_address).await;
+        let _ = handle_session(private_key, public_key, ip_address).await;
     }
 }
 
@@ -106,7 +105,7 @@ async fn handle_session(
     peer_public_key: PublicKey,
     socket_address: SocketAddr,
 ) -> Result<(), &'static str> {
-    let mut stream = match TcpStream::connect(&socket_address).await {
+    let stream = match TcpStream::connect(&socket_address).await {
         Ok(stream) => {
             info!(
                 "TCP connection to {:?} established! ",
@@ -135,17 +134,19 @@ async fn handle_session(
     rplx_tp.construct_auth_request(shared_key, our_public_key);
 
     let mut framed = Framed::new(stream, rplx_tp);
+    debug!("We're sending Auth!");
 
     framed
         .send(RLPx_Message::Auth)
         .await
         .map_err(|_| "Frame send Error ")?;
-
+    
+    debug!("We're recieving ack!");
 
     framed.next().await;
 
 
-
+    debug!("We're sending Hello!");
     framed
         .send(RLPx_Message::Hello)
         .await

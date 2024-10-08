@@ -339,7 +339,7 @@ impl ECIES {
         let mut ingress_mac_hasher = Keccak256::new();
         ingress_mac_hasher.update(ingress_mac);
         let mut egress_mac_hasher = Keccak256::new();
-        egress_mac_hasher.update(ingress_mac);
+        egress_mac_hasher.update(egress_mac);
 
         HandshakeSecrets {
             static_shared_secret,
