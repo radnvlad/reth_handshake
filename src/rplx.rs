@@ -4,6 +4,7 @@ use crate::{
     messages::{Capability, Disconnect, Hello, Ping, Pong, RLPx_Message, Status},
 };
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt, KeyInit};
+use alloy_primitives::B512;
 use alloy_rlp::{Buf, BytesMut, Encodable};
 use ctr::cipher::KeyIvInit;
 use ctr::cipher::StreamCipher;
@@ -16,7 +17,6 @@ use sha2::{Digest, Sha256};
 use sha3::Keccak256;
 use snap::raw::Decoder as SnapDecoder;
 use tokio_util::codec::{Decoder, Encoder};
-use alloy_primitives::B512;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RlpxState {
@@ -38,7 +38,6 @@ pub struct RLPx {
     public_key: PublicKey,
     secrets: Option<HandshakeSecrets>,
 }
-
 
 const PROTOCOL_VERSION: usize = 5;
 const ZERO_HEADER: &[u8; 16] = &[0, 0, 148, 194, 128, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // Lifted from geth
@@ -105,7 +104,6 @@ impl RLPx {
         cipher.encrypt_block(GenericArray::from_mut_slice(data));
     }
 
-
     pub fn aes_decrypt(aes_key: &H256, data: &mut [u8]) {
         let cipher = aes::Aes256::new(aes_key.as_ref().into());
         cipher.decrypt_block(GenericArray::from_mut_slice(data));
@@ -119,22 +117,25 @@ impl RLPx {
         // header = frame-size || header-data || header-padding
         let mut header_buf = BytesMut::new();
         header_buf.extend_from_slice(ZERO_HEADER);
-        // We're missing a byte from the length here. 
-        let x:u16 = data.len() as u16;
+        // We're missing a byte from the length here.
+        let x: u16 = data.len() as u16;
         header_buf[1..3].copy_from_slice(&x.to_be_bytes());
-
 
         let secrets = self.secrets.as_mut().unwrap();
 
         // header-ciphertext = aes(aes-secret, header)
-        secrets.aes_keystream_egress.apply_keystream(header_buf.as_mut());
+        secrets
+            .aes_keystream_egress
+            .apply_keystream(header_buf.as_mut());
         // header-mac-seed = aes(mac-secret, keccak256.digest(egress-mac)[:16]) ^ header-ciphertext
-        let egress_mac  = &secrets.egress_mac.clone().finalize();
-        let mut egress_mac_digest: [u8; 16] = [0;16];
+        let egress_mac = &secrets.egress_mac.clone().finalize();
+        let mut egress_mac_digest: [u8; 16] = [0; 16];
         egress_mac_digest.copy_from_slice(&egress_mac[..16]);
-        secrets.mac_secret.encrypt_block(GenericArray::from_mut_slice(egress_mac_digest.as_mut()));
+        secrets
+            .mac_secret
+            .encrypt_block(GenericArray::from_mut_slice(egress_mac_digest.as_mut()));
 
-        let mut header_mac_seed: [u8; 16] = [0;16];
+        let mut header_mac_seed: [u8; 16] = [0; 16];
         for i in 0..header_mac_seed.len() {
             header_mac_seed[i] = egress_mac_digest[i] ^ header_buf[i];
         }
@@ -167,13 +168,15 @@ impl RLPx {
         // frame-mac-seed = aes(mac-secret, keccak256.digest(egress-mac)[:16]) ^ keccak256.digest(egress-mac)[:16]
         // keccak256.digest(egress-mac)[:16])
         let egress_mac = &secrets.egress_mac.clone().finalize();
-        let mut egress_mac_digest: [u8; 16] = [0;16];
+        let mut egress_mac_digest: [u8; 16] = [0; 16];
         egress_mac_digest.copy_from_slice(&egress_mac[0..16]);
-        let mut egress_mac_aes =  egress_mac_digest.clone();
+        let mut egress_mac_aes = egress_mac_digest.clone();
         // This is done in block encryption mode
-        //aes(mac-secret, keccak256.digest(egress-mac)[:16]) 
-        secrets.mac_secret.encrypt_block(GenericArray::from_mut_slice(egress_mac_aes.as_mut()));
-        let mut frame_mac_seed: [u8; 16] = [0;16];
+        //aes(mac-secret, keccak256.digest(egress-mac)[:16])
+        secrets
+            .mac_secret
+            .encrypt_block(GenericArray::from_mut_slice(egress_mac_aes.as_mut()));
+        let mut frame_mac_seed: [u8; 16] = [0; 16];
         for i in 0..frame_mac_seed.len() {
             frame_mac_seed[i] = egress_mac_aes[i] ^ egress_mac_digest[i];
         }
@@ -189,8 +192,10 @@ impl RLPx {
         out
     }
 
-
-    pub fn decode_frame<'a>(&mut self, data_in: &'a mut [u8]) -> Result<&'a mut [u8], &'static str> {
+    pub fn decode_frame<'a>(
+        &mut self,
+        data_in: &'a mut [u8],
+    ) -> Result<&'a mut [u8], &'static str> {
         const FRAME_HEADER_CIPHERTEXT_SIZE: usize = 16;
         const FRAME_HEADER_MAC_SIZE: usize = 16;
 
@@ -214,7 +219,7 @@ impl RLPx {
         // Self::aes_decrypt(&self.secrets.unwrap().aes_secret, header_ciphertext);
 
         // debug!("Header decrypted is: {:?}", header_ciphertext);
-        // // self.compare_update_ingress_header_mac(header_ciphertext, header_mac);       
+        // // self.compare_update_ingress_header_mac(header_ciphertext, header_mac);
 
         // // self.secrets.unwrap().ingress_mac.compute_header(header_ciphertext);
         // // if header_mac != self.secrets.unwrap().ingress_mac.digest() {
@@ -222,7 +227,6 @@ impl RLPx {
         // // }
 
         // // TODO: Check MAC here,
-
 
         Err("NotImpl")
     }
@@ -300,9 +304,7 @@ impl Decoder for RLPx {
         // debug!("Raw data is {:?} ", src.as_mut());
 
         match self.rlpx_state {
-
-            RlpxState::AuthSent =>
-            {
+            RlpxState::AuthSent => {
                 // debug!("We're decoding !! Raw Data is: {:?} ", src);
 
                 if src.is_empty() {
@@ -312,22 +314,21 @@ impl Decoder for RLPx {
                     .ecies
                     .decrypt(src)
                     .map_err(|e| debug!("Frame decrypt Error: {:?}", e));
-        
+
                 self.secrets = Some(self.ecies.get_secrets());
                 self.rlpx_state = RlpxState::AuthAckRecieved;
-            } 
+            }
             RlpxState::AuthAckRecieved => {
                 debug!("We're decoding frame!! ");
                 todo!();
                 // debug!("Raw frame is {:?} ", src.as_mut());
 
                 // self.decode_frame(src);
-
             }
             _ => {
                 debug!("Invalid frame!! ");
                 panic!();
-                return Ok(None)
+                return Ok(None);
             }
         }
         debug!("We're Exiting decode!! State is {:?}", self.rlpx_state);

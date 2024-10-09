@@ -8,18 +8,14 @@ use sha2::{Digest, Sha256};
 use sha3::Keccak256;
 use tokio_util::bytes::{Bytes, BytesMut};
 
-
-
 pub type Aes128Ctr64BE = ctr::Ctr64BE<aes::Aes128>;
 pub type Aes256Ctr64BE = ctr::Ctr64BE<aes::Aes256>;
-
 
 #[derive(Clone, Copy, Debug)]
 pub enum ECIESDirection {
     Outgoing,
     Incoming,
 }
-
 
 #[derive(Clone, Debug)]
 pub struct ECIES {
@@ -149,13 +145,11 @@ impl ECIES {
         data_encrypted_out.extend_from_slice(&encrypted_data);
         data_encrypted_out.extend_from_slice(tag.as_bytes());
         match self.connection_direction {
-            ECIESDirection::Outgoing => 
-            {
+            ECIESDirection::Outgoing => {
                 self.auth.clear();
                 self.auth.extend(&data_encrypted_out);
             }
-            ECIESDirection::Incoming =>
-            {
+            ECIESDirection::Incoming => {
                 self.ack.clear();
                 self.ack.extend(&data_encrypted_out);
             }
@@ -164,15 +158,12 @@ impl ECIES {
     }
 
     pub fn decrypt<'a>(&mut self, data_in: &'a mut [u8]) -> Result<&'a mut [u8], &'static str> {
-
         match self.connection_direction {
-            ECIESDirection::Incoming => 
-            {
+            ECIESDirection::Incoming => {
                 self.auth.clear();
                 self.auth.extend_from_slice(data_in);
             }
-            ECIESDirection::Outgoing =>
-            {
+            ECIESDirection::Outgoing => {
                 self.ack.clear();
                 self.ack.extend_from_slice(data_in);
             }
@@ -255,7 +246,7 @@ impl ECIES {
         H256::from(hasher.finalize().as_ref())
     }
 
-    pub fn get_secrets(&self) -> HandshakeSecrets{
+    pub fn get_secrets(&self) -> HandshakeSecrets {
         // Generate the secrets list obtained after the ECIES handshake took place,
         // Inputs:
         //  - privkey
@@ -281,7 +272,6 @@ impl ECIES {
         //  - egress-mac = keccak256.init((mac-secret ^ recipient-nonce) || auth)
         //  - ingress-mac = keccak256.init((mac-secret ^ initiator-nonce) || ack)
 
-
         let static_shared_secret = Self::agree(self.peer_public_key, self.our_private_key);
 
         let ephemeral_key = Self::agree(
@@ -303,17 +293,14 @@ impl ECIES {
         let mut ingress_mac = Keccak256::new();
         let mut egress_mac = Keccak256::new();
 
-
         match self.connection_direction {
-            ECIESDirection::Incoming => 
-            {
+            ECIESDirection::Incoming => {
                 ingress_mac.update(mac_secret ^ self.resp_nonce);
                 ingress_mac.update(&self.auth);
                 egress_mac.update(mac_secret ^ self.init_nonce);
                 egress_mac.update(&self.ack);
             }
-            ECIESDirection::Outgoing =>
-            {
+            ECIESDirection::Outgoing => {
                 egress_mac.update(mac_secret ^ self.resp_nonce);
                 egress_mac.update(&self.auth);
                 ingress_mac.update(mac_secret ^ self.init_nonce);
@@ -321,11 +308,8 @@ impl ECIES {
             }
         }
 
-
-
         // debug!("ack is: {:?}", self.ack.as_ref());
         // debug!("Auth is: {:?}", self.auth.as_ref());
-
 
         // debug!(
         //     "static_shared_secret is: {:?}",
@@ -341,7 +325,10 @@ impl ECIES {
         // debug!("resp_nonce is: {:?}", self.resp_nonce.as_bytes());
         // debug!("init_nonce is: {:?}", self.init_nonce.as_bytes());
 
-        debug!(" Egress_mac is: {:?}", H256::from(egress_mac.clone().finalize().as_ref()));
+        debug!(
+            " Egress_mac is: {:?}",
+            H256::from(egress_mac.clone().finalize().as_ref())
+        );
         // debug!("ingress_mac is: {:?}", ingress_mac.as_bytes());
 
         // let mut ingress_mac_hasher = Keccak256::new();
@@ -349,7 +336,7 @@ impl ECIES {
         // let mut egress_mac_hasher = Keccak256::new_from_slice(egress_mac);
         // egress_mac_hasher.
 
-        // Apparently, the keystream has the IV initialized with 0. This, I did not see in the documentation. 
+        // Apparently, the keystream has the IV initialized with 0. This, I did not see in the documentation.
         let iv = H128::default();
 
         // The mac secret AES encryption is running in block mode, whereas the AES ingress/outgress is running in keystream mode.
@@ -359,8 +346,14 @@ impl ECIES {
             static_shared_secret,
             ephemeral_key,
             shared_secret,
-            aes_keystream_ingress: Aes256Ctr64BE::new(aes_secret.as_ref().into(), iv.as_ref().into()),
-            aes_keystream_egress: Aes256Ctr64BE::new(aes_secret.as_ref().into(), iv.as_ref().into()),
+            aes_keystream_ingress: Aes256Ctr64BE::new(
+                aes_secret.as_ref().into(),
+                iv.as_ref().into(),
+            ),
+            aes_keystream_egress: Aes256Ctr64BE::new(
+                aes_secret.as_ref().into(),
+                iv.as_ref().into(),
+            ),
             mac_secret: mac_cypher,
             ingress_mac: ingress_mac,
             egress_mac: egress_mac,
