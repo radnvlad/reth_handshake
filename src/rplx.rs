@@ -199,6 +199,8 @@ impl RLPx {
         const FRAME_HEADER_CIPHERTEXT_SIZE: usize = 16;
         const FRAME_MAC_SIZE: usize = 16;
 
+        debug!("Full frame: {:?}", data_in);
+
         // frame = header-ciphertext || header-mac || frame-ciphertext || frame-mac
         let (header_ciphertext, rest) = data_in
             .split_at_mut_checked(FRAME_HEADER_CIPHERTEXT_SIZE)
@@ -212,6 +214,36 @@ impl RLPx {
             .split_at_mut_checked((rest.len() - FRAME_MAC_SIZE))
             .ok_or("No frame MAC ")?;
 
+        let secrets = self.secrets.as_mut().unwrap();
+
+        let ingress_mac = &secrets.ingress_mac.clone().finalize();
+        let mut ingress_mac_digest: [u8; 16] = [0; 16];
+        ingress_mac_digest.copy_from_slice(&ingress_mac[..16]);
+        secrets
+            .mac_secret
+            .encrypt_block(GenericArray::from_mut_slice(ingress_mac_digest.as_mut()));
+
+        let mut header_mac_seed: [u8; 16] = [0; 16];
+        for i in 0..header_mac_seed.len() {
+            header_mac_seed[i] = ingress_mac_digest[i] ^ header_ciphertext[i];
+        }
+
+        // egress-mac = keccak256.update(egress-mac, header-mac-seed)
+        // header-mac = keccak256.digest(egress-mac)[:16]
+        secrets.ingress_mac.update(header_mac_seed);
+        let header_mac_computed = &secrets.egress_mac.clone().finalize()[..16];
+        debug!("header_ciphertext: {:?}", header_ciphertext);
+        debug!("header_mac_computed: {:?}", header_mac_computed);
+        debug!("header_mac:  {:?}", header_mac);
+
+        if header_mac_computed != header_mac {
+
+            debug!("MAC mismatch");
+            panic!();
+
+            return Err("Header MAC mismatch!");
+
+        }
         // let digest = Self::hash_digest(&self.secrets.unwrap().ingress_mac);
 
         // debug!("Header encrypted is: {:?}", header_ciphertext);
@@ -301,7 +333,7 @@ impl Decoder for RLPx {
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         debug!("We're decoding!! State is {:?}", self.rlpx_state);
-        // debug!("Raw data is {:?} ", src.as_mut());
+        debug!("Raw data is {:?} ", src.as_mut());
 
         match self.rlpx_state {
             RlpxState::AuthSent => {
@@ -323,6 +355,7 @@ impl Decoder for RLPx {
                 // debug!("Raw frame is {:?} ", src.as_mut());
 
                 self.decode_frame(src);
+                return Ok(Some(RLPx_Message::Hello));
             }
             _ => {
                 debug!("Invalid frame!! ");
