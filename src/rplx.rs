@@ -335,13 +335,18 @@ impl Decoder for RLPx {
         debug!("We're decoding!! State is {:?}", self.rlpx_state);
         debug!("Raw data is {:?} ", src.as_mut());
 
+        // See example here:
+        // https://docs.rs/tokio-util/latest/tokio_util/codec/index.html
+        // It seems we need to validate full frame and clear only the frame
+        //   data we processed. There are some issues with what I'm doing here,
+        //   so caveat emptor. To be addressed after handshake works properly.
+        // We proooobably need to process header before frame data.   
+        if src.is_empty() {
+            return Ok(None);
+        }
         match self.rlpx_state {
             RlpxState::AuthSent => {
                 // debug!("We're decoding !! Raw Data is: {:?} ", src);
-
-                if src.is_empty() {
-                    return Ok(None);
-                }
                 let _decrypted = self
                     .ecies
                     .decrypt(src)
@@ -349,10 +354,14 @@ impl Decoder for RLPx {
 
                 self.secrets = Some(self.ecies.get_secrets());
                 self.rlpx_state = RlpxState::AuthAckRecieved;
+                debug!("Raw data after Ack rx buffer is:  {:?} ", src.as_mut());
+                src.clear();
+                return Ok(Some(RLPx_Message::AuthAck));
             }
             RlpxState::AuthAckRecieved => {
+
                 debug!("We're decoding frame!! ");
-                // debug!("Raw frame is {:?} ", src.as_mut());
+                debug!("Raw frame is {:?} ", src.as_mut());
 
                 self.decode_frame(src);
                 return Ok(Some(RLPx_Message::Hello));
@@ -360,10 +369,9 @@ impl Decoder for RLPx {
             _ => {
                 debug!("Invalid frame!! ");
                 panic!();
-                return Ok(None);
+                return Ok(None)
             }
         }
-        debug!("We're Exiting decode!! State is {:?}", self.rlpx_state);
 
         Ok(Some(RLPx_Message::AuthAck))
     }

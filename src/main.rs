@@ -150,19 +150,18 @@ async fn handle_session(
         .send(RLPx_Message::Hello)
         .await
         .map_err(|_| "Frame send Error ")?;
+    debug!("We sent Hello!");
+    debug!("We're waiting Hello!");
 
-    let mut state = SessionState::SendingAuth;
+    framed.next().await;
+    debug!("We've sent Hello!");
+
 
     loop {
-        framed.next().await;
-        match state {
-            SessionState::SendingAuth => {
-                // framed.next().await;
-                state = SessionState::RecivingAuthAck;
-            }
-            SessionState::RecivingAuthAck => {}
-            SessionState::RecievingHello => {}
-            SessionState::ProtocolActive => {}
-        }
+        // debug!("Main Looop!!");
+
+        // framed.next().await;
+        // debug!("Main Looop end!!");
+
     }
 }
