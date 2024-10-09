@@ -16,9 +16,7 @@ use sha2::{Digest, Sha256};
 use sha3::Keccak256;
 use snap::raw::Decoder as SnapDecoder;
 use tokio_util::codec::{Decoder, Encoder};
-pub type Aes128Ctr64BE = ctr::Ctr64BE<aes::Aes128>;
 use alloy_primitives::B512;
-
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RlpxState {
@@ -31,7 +29,7 @@ pub enum RlpxState {
     Disconnected,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct RLPx {
     rlpx_state: RlpxState,
     direction: ECIESDirection,
@@ -127,12 +125,12 @@ impl RLPx {
         let secrets = self.secrets.as_mut().unwrap();
 
         // header-ciphertext = aes(aes-secret, header)
-        secrets.aes_secret.encrypt_block(GenericArray::from_mut_slice(header_buf.as_mut()));
+        secrets.aes_secret.apply_keystream(header_buf.as_mut());
         // header-mac-seed = aes(mac-secret, keccak256.digest(egress-mac)[:16]) ^ header-ciphertext
         let egress_mac  = &secrets.egress_mac.clone().finalize();
         let mut egress_mac_digest: [u8; 16] = [0;16];
         egress_mac_digest.copy_from_slice(&egress_mac[..16]);
-        secrets.mac_secret.encrypt_block(GenericArray::from_mut_slice(egress_mac_digest.as_mut()));
+        secrets.mac_secret.apply_keystream(egress_mac_digest.as_mut());
         let mut header_mac_seed: [u8; 16] = [0;16];
         for i in 0..header_mac_seed.len() {
             header_mac_seed[i] = egress_mac_digest[i] ^ header_buf[i];
@@ -161,7 +159,7 @@ impl RLPx {
         encrypted[..data.len()].copy_from_slice(data);
 
         //frame-ciphertext = aes(aes-secret, frame-data || frame-padding)
-        secrets.aes_secret.encrypt_block(GenericArray::from_mut_slice(encrypted.as_mut()));
+        secrets.aes_secret.apply_keystream(encrypted);
         // egress-mac = keccak256.update(egress-mac, frame-ciphertext)
         secrets.egress_mac.update(encrypted);
         // frame-mac-seed = aes(mac-secret, keccak256.digest(egress-mac)[:16]) ^ keccak256.digest(egress-mac)[:16]
@@ -169,7 +167,7 @@ impl RLPx {
         let mut egress_mac_digest: [u8; 16] = [0;16];
         egress_mac_digest.copy_from_slice(&egress_mac[0..16]);
         let mut egress_mac_aes =  egress_mac_digest.clone();
-        secrets.aes_secret.encrypt_block(GenericArray::from_mut_slice(&mut egress_mac_aes));
+        secrets.aes_secret.apply_keystream(&mut egress_mac_aes);
         let mut frame_mac_seed: [u8; 16] = [0;16];
         for i in 0..frame_mac_seed.len() {
             frame_mac_seed[i] = egress_mac_aes[i] ^ egress_mac_digest[i];
@@ -261,6 +259,8 @@ impl Encoder<RLPx_Message> for RLPx {
                 dst.clear();
 
                 dst.extend_from_slice(&self.auth_request);
+
+                self.rlpx_state = RlpxState::AuthSent;
             }
             RLPx_Message::AuthAck => {
                 // Implement AuthAck encoding here
@@ -268,7 +268,6 @@ impl Encoder<RLPx_Message> for RLPx {
             }
             RLPx_Message::Hello => {
                 dst.extend_from_slice(&self.hello_msg());
-                todo!()
             }
             RLPx_Message::Disconnect(reason) => {
                 todo!()
@@ -283,7 +282,6 @@ impl Encoder<RLPx_Message> for RLPx {
                 todo!()
             }
         }
-        self.rlpx_state = RlpxState::AuthSent;
         Ok(())
     }
 }
@@ -293,7 +291,7 @@ impl Decoder for RLPx {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        debug!("We're decoding!! ");
+        debug!("We're decoding!! State is {:?}", self.rlpx_state);
         // debug!("Raw data is {:?} ", src.as_mut());
 
         match self.rlpx_state {
@@ -315,6 +313,7 @@ impl Decoder for RLPx {
             } 
             RlpxState::AuthAckRecieved => {
                 debug!("We're decoding frame!! ");
+                todo!();
                 // debug!("Raw frame is {:?} ", src.as_mut());
 
                 // self.decode_frame(src);
@@ -322,11 +321,11 @@ impl Decoder for RLPx {
             }
             _ => {
                 debug!("Invalid frame!! ");
-
+                panic!();
                 return Ok(None)
             }
         }
-        debug!("Exiting decode!! ");
+        debug!("We're Exiting decode!! State is {:?}", self.rlpx_state);
 
         Ok(Some(RLPx_Message::AuthAck))
     }

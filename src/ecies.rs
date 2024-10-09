@@ -8,7 +8,11 @@ use sha2::{Digest, Sha256};
 use sha3::Keccak256;
 use tokio_util::bytes::{Bytes, BytesMut};
 
-use crate::rplx::Aes128Ctr64BE;
+
+
+pub type Aes128Ctr64BE = ctr::Ctr64BE<aes::Aes128>;
+pub type Aes256Ctr64BE = ctr::Ctr64BE<aes::Aes256>;
+
 
 #[derive(Clone, Copy, Debug)]
 pub enum ECIESDirection {
@@ -28,15 +32,16 @@ pub struct ECIES {
     resp_nonce: H256,
     auth: BytesMut,
     ack: BytesMut,
+    iv: H128,
 }
 
-#[derive(Debug, Clone )]
+#[derive(Clone)]
 pub struct HandshakeSecrets {
     pub static_shared_secret: H256,
     pub ephemeral_key: H256,
     pub shared_secret: H256,
-    pub aes_secret: aes::Aes256,
-    pub mac_secret: aes::Aes256,
+    pub aes_secret: Aes256Ctr64BE,
+    pub mac_secret: Aes256Ctr64BE,
     pub ingress_mac: Keccak256,
     pub egress_mac: Keccak256,
 }
@@ -57,6 +62,7 @@ impl ECIES {
             resp_nonce: H256::random(),
             auth: BytesMut::new(),
             ack: BytesMut::new(),
+            iv: H128::random(),
         }
     }
 
@@ -121,7 +127,7 @@ impl ECIES {
         // S = Px where (Px, Py) = r * KB
         let shared_key = Self::agree(self.peer_public_key, random_secret_key);
         // Generate initialization vector, each package has a new, spanking fresh iv
-        let iv = H128::random();
+        let iv = self.iv;
 
         // kE || kM = KDF(S, 32)
         let (encryption_key, mac_key) = Self::derive_keys(&shared_key)?;
@@ -186,7 +192,7 @@ impl ECIES {
             .split_at_mut_checked(PUBLIC_KEY_SIZE)
             .ok_or("No public key data!")?;
 
-        debug!("Extracted remote pub_data is: {:?}", pub_data);
+        // debug!("Extracted remote pub_data is: {:?}", pub_data);
 
         let (iv, rest) = rest
             .split_at_mut_checked(IV_SIZE)
@@ -345,8 +351,8 @@ impl ECIES {
             static_shared_secret,
             ephemeral_key,
             shared_secret,
-            aes_secret: <aes::Aes256 as aes::cipher::KeyInit>::new(aes_secret.as_ref().into()),
-            mac_secret: <aes::Aes256 as aes::cipher::KeyInit>::new(mac_secret.as_ref().into()),
+            aes_secret: Aes256Ctr64BE::new(aes_secret.as_ref().into(), self.iv.as_ref().into()),
+            mac_secret: Aes256Ctr64BE::new(mac_secret.as_ref().into(), self.iv.as_ref().into()),
             ingress_mac: ingress_mac_hasher,
             egress_mac: egress_mac_hasher,
         }
