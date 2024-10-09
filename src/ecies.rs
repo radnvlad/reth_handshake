@@ -32,9 +32,6 @@ pub struct ECIES {
 
 #[derive(Clone)]
 pub struct HandshakeSecrets {
-    pub static_shared_secret: H256,
-    pub ephemeral_key: H256,
-    pub shared_secret: H256,
     pub aes_keystream_ingress: Aes256Ctr64BE,
     pub aes_keystream_egress: Aes256Ctr64BE,
     pub mac_secret: aes::Aes256,
@@ -102,7 +99,6 @@ impl ECIES {
         Ok((encryption_key, mac_key))
     }
 
-    // calculate_remote_tag and calculate_tag can get rolled together I think
     fn calculate_remote_tag(
         mac_key: &[u8],
         iv: &H128,
@@ -257,10 +253,10 @@ impl ECIES {
         //  - initiator-nonce
         // Outputs:
         //   - static-shared-secret = ecdh.agree(privkey, remote-pubk)
-        //   -ephemeral-key = ecdh.agree(ephemeral-privkey, remote-ephemeral-pubk)
-        //   -shared-secret = keccak256(ephemeral-key || keccak256(nonce || initiator-nonce))
-        //   -aes-secret = keccak256(ephemeral-key || shared-secret)
-        //   -mac-secret = keccak256(ephemeral-key || aes-secret)
+        //   - ephemeral-key = ecdh.agree(ephemeral-privkey, remote-ephemeral-pubk)
+        //   - shared-secret = keccak256(ephemeral-key || keccak256(nonce || initiator-nonce))
+        //   - aes-secret = keccak256(ephemeral-key || shared-secret)
+        //   - mac-secret = keccak256(ephemeral-key || aes-secret)
         //
         // For the MAC  we have inputs :
         //  - mac-secret (we get theat above)
@@ -271,8 +267,6 @@ impl ECIES {
         // Outpus:
         //  - egress-mac = keccak256.init((mac-secret ^ recipient-nonce) || auth)
         //  - ingress-mac = keccak256.init((mac-secret ^ initiator-nonce) || ack)
-
-        let static_shared_secret = Self::agree(self.peer_public_key, self.our_private_key);
 
         let ephemeral_key = Self::agree(
             self.ephemeral_remote_pub_key.unwrap(),
@@ -348,9 +342,6 @@ impl ECIES {
         let mac_cypher = <aes::Aes256 as aes::cipher::KeyInit>::new(mac_secret.as_ref().into());
 
         HandshakeSecrets {
-            static_shared_secret,
-            ephemeral_key,
-            shared_secret,
             aes_keystream_ingress: Aes256Ctr64BE::new(
                 aes_secret.as_ref().into(),
                 iv.as_ref().into(),

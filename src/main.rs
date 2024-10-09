@@ -154,7 +154,7 @@ async fn handle_session(
     debug!("We're waiting Hello!");
 
     framed.next().await;
-    debug!("We've sent Hello!");
+    debug!("We've recieved Hello!");
 
 
     loop {
