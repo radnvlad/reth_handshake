@@ -260,23 +260,40 @@ impl RLPx {
         //TODO: parse frame header!
 
 
+        // egress-mac = keccak256.update(egress-mac, frame-ciphertext)
+        secrets.ingress_mac.update(&frame_ciphertext);
+        // frame-mac-seed = aes(mac-secret, keccak256.digest(egress-mac)[:16]) ^ keccak256.digest(egress-mac)[:16]
+        // keccak256.digest(egress-mac)[:16])
+        let ingress_mac = &secrets.ingress_mac.clone().finalize();
+        let mut ingress_mac_digest: [u8; 16] = [0; 16];
+        ingress_mac_digest.copy_from_slice(&ingress_mac[0..16]);
+        let mut ingress_mac_aes = ingress_mac_digest.clone();
+        // This is done in block encryption mode
+        //aes(mac-secret, keccak256.digest(egress-mac)[:16])
+        secrets
+            .mac_secret
+            .encrypt_block(GenericArray::from_mut_slice(ingress_mac_aes.as_mut()));
+        let mut frame_mac_seed: [u8; 16] = [0; 16];
+        for i in 0..frame_mac_seed.len() {
+            frame_mac_seed[i] = ingress_mac_aes[i] ^ ingress_mac_digest[i];
+        }
+
+        // egress-mac = keccak256.update(egress-mac, frame-mac-seed)
+        secrets.ingress_mac.update(frame_mac_seed);
+
+        // frame-mac = keccak256.digest(egress-mac)[:16]
+        let frame_mac_computed = &secrets.ingress_mac.clone().finalize()[..16];
+
+
+        if frame_mac_computed != frame_mac {
+            return Err("Frame MAC mismatch!");
+        }
+        debug!("Frame MAC matches");
+        
         debug!("frame_ciphertext pre-de-enc:  {:?}", frame_ciphertext);
         secrets.aes_keystream_ingress.apply_keystream(frame_ciphertext);
         debug!("frame_ciphertext de-enc:  {:?}", frame_ciphertext);
 
-        // let digest = Self::hash_digest(&self.secrets.unwrap().ingress_mac);
-
-        // debug!("Header encrypted is: {:?}", header_ciphertext);
-
-        // Self::aes_decrypt(&self.secrets.unwrap().aes_secret, header_ciphertext);
-
-        // debug!("Header decrypted is: {:?}", header_ciphertext);
-        // // self.compare_update_ingress_header_mac(header_ciphertext, header_mac);
-
-        // // self.secrets.unwrap().ingress_mac.compute_header(header_ciphertext);
-        // // if header_mac != self.secrets.unwrap().ingress_mac.digest() {
-        // //     return Err(Error::InvalidMac(mac));
-        // // }
 
         Err("NotImpl")
     }
