@@ -325,10 +325,15 @@ impl ECIES {
         // debug!("resp_nonce is: {:?}", self.resp_nonce.as_bytes());
         // debug!("init_nonce is: {:?}", self.init_nonce.as_bytes());
 
-        debug!(
-            " Egress_mac is: {:?}",
-            H256::from(egress_mac.clone().finalize().as_ref())
-        );
+        // debug!(
+        //     " Egress_mac is: {:?}",
+        //     H256::from(egress_mac.clone().finalize().as_ref())
+        // );
+
+        // debug!(
+        //     " Ingress_mac is: {:?}",
+        //     H256::from(ingress_mac.clone().finalize().as_ref())
+        // );
         // debug!("ingress_mac is: {:?}", ingress_mac.as_bytes());
 
         // let mut ingress_mac_hasher = Keccak256::new();

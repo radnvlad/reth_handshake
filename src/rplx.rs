@@ -199,8 +199,6 @@ impl RLPx {
         const FRAME_HEADER_CIPHERTEXT_SIZE: usize = 16;
         const FRAME_MAC_SIZE: usize = 16;
 
-        debug!("Full frame: {:?}", data_in);
-
         // frame = header-ciphertext || header-mac || frame-ciphertext || frame-mac
         let (header_ciphertext, rest) = data_in
             .split_at_mut_checked(FRAME_HEADER_CIPHERTEXT_SIZE)
@@ -214,36 +212,58 @@ impl RLPx {
             .split_at_mut_checked((rest.len() - FRAME_MAC_SIZE))
             .ok_or("No frame MAC ")?;
 
+
+        // Get a local reference so it's simpler and I don't have to unwrap it every time. 
         let secrets = self.secrets.as_mut().unwrap();
 
+
+        // According to https://github.com/ethereum/devp2p/blob/master/rlpx.md the handshake works like this:
+        // header-mac-seed = aes(mac-secret, keccak256.digest(egress-mac)[:16]) ^ header-ciphertext
+        // egress-mac = keccak256.update(egress-mac, header-mac-seed)
+        // header-mac = keccak256.digest(egress-mac)[:16]
         let ingress_mac = &secrets.ingress_mac.clone().finalize();
+        // debug!("ingress_mac: {:?}", ingress_mac);
+
         let mut ingress_mac_digest: [u8; 16] = [0; 16];
+
         ingress_mac_digest.copy_from_slice(&ingress_mac[..16]);
+        // debug!("ingress_mac_digest: {:?}", ingress_mac_digest);
+
         secrets
             .mac_secret
             .encrypt_block(GenericArray::from_mut_slice(ingress_mac_digest.as_mut()));
+        // debug!("ingress_mac_digest block encrypted with AES: {:?}", ingress_mac_digest);
 
         let mut header_mac_seed: [u8; 16] = [0; 16];
         for i in 0..header_mac_seed.len() {
             header_mac_seed[i] = ingress_mac_digest[i] ^ header_ciphertext[i];
         }
+        // debug!("header_mac_seed: {:?}", header_mac_seed);
+
 
         // egress-mac = keccak256.update(egress-mac, header-mac-seed)
         // header-mac = keccak256.digest(egress-mac)[:16]
         secrets.ingress_mac.update(header_mac_seed);
-        let header_mac_computed = &secrets.egress_mac.clone().finalize()[..16];
-        debug!("header_ciphertext: {:?}", header_ciphertext);
-        debug!("header_mac_computed: {:?}", header_mac_computed);
-        debug!("header_mac:  {:?}", header_mac);
+        // debug!("egress-mac digest full: {:?}", &secrets.ingress_mac.clone().finalize());
+
+        let header_mac_computed = &secrets.ingress_mac.clone().finalize()[..16];
+        // debug!("header_ciphertext: {:?}", header_ciphertext);
+        // debug!("header_mac_computed: {:?}", header_mac_computed);
+        // debug!("header_mac:  {:?}", header_mac);
 
         if header_mac_computed != header_mac {
-
-            debug!("MAC mismatch");
-            panic!();
-
             return Err("Header MAC mismatch!");
-
         }
+        debug!("Header MAC matches");
+        secrets.aes_keystream_ingress.apply_keystream(header_ciphertext);
+
+        //TODO: parse frame header!
+
+
+        debug!("frame_ciphertext pre-de-enc:  {:?}", frame_ciphertext);
+        secrets.aes_keystream_ingress.apply_keystream(frame_ciphertext);
+        debug!("frame_ciphertext de-enc:  {:?}", frame_ciphertext);
+
         // let digest = Self::hash_digest(&self.secrets.unwrap().ingress_mac);
 
         // debug!("Header encrypted is: {:?}", header_ciphertext);
@@ -257,8 +277,6 @@ impl RLPx {
         // // if header_mac != self.secrets.unwrap().ingress_mac.digest() {
         // //     return Err(Error::InvalidMac(mac));
         // // }
-
-        // // TODO: Check MAC here,
 
         Err("NotImpl")
     }
@@ -333,7 +351,7 @@ impl Decoder for RLPx {
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         debug!("We're decoding!! State is {:?}", self.rlpx_state);
-        debug!("Raw data is {:?} ", src.as_mut());
+        // debug!("Raw data is {:?} ", src.as_mut());
 
         // See example here:
         // https://docs.rs/tokio-util/latest/tokio_util/codec/index.html
@@ -354,7 +372,7 @@ impl Decoder for RLPx {
 
                 self.secrets = Some(self.ecies.get_secrets());
                 self.rlpx_state = RlpxState::AuthAckRecieved;
-                debug!("Raw data after Ack rx buffer is:  {:?} ", src.as_mut());
+                // debug!("Raw data after Ack rx buffer is:  {:?} ", src.as_mut());
                 src.clear();
                 return Ok(Some(RLPx_Message::AuthAck));
             }
