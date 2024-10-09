@@ -125,25 +125,38 @@ impl RLPx {
         let secrets = self.secrets.as_mut().unwrap();
 
         // header-ciphertext = aes(aes-secret, header)
-        secrets.aes_secret.apply_keystream(header_buf.as_mut());
+        secrets.aes_keystream_egress.apply_keystream(header_buf.as_mut());
         // header-mac-seed = aes(mac-secret, keccak256.digest(egress-mac)[:16]) ^ header-ciphertext
+        debug!("Egress Mac finalized is {:?} ", secrets.egress_mac.clone().finalize());
+
         let egress_mac  = &secrets.egress_mac.clone().finalize();
+        debug!("Digest 1 is {:?} ", egress_mac);
+
         let mut egress_mac_digest: [u8; 16] = [0;16];
         egress_mac_digest.copy_from_slice(&egress_mac[..16]);
-        secrets.mac_secret.apply_keystream(egress_mac_digest.as_mut());
+        debug!("egress_mac_digest 1 is {:?} ", egress_mac_digest);
+
+        secrets.mac_secret.encrypt_block(GenericArray::from_mut_slice(egress_mac_digest.as_mut()));
+
+        debug!("egress_mac_digest Encrypted is {:?} ", egress_mac_digest);
+
         let mut header_mac_seed: [u8; 16] = [0;16];
         for i in 0..header_mac_seed.len() {
             header_mac_seed[i] = egress_mac_digest[i] ^ header_buf[i];
         }
 
+        debug!("header_mac_seed is {:?} ", header_mac_seed);
+
         // egress-mac = keccak256.update(egress-mac, header-mac-seed)
         // header-mac = keccak256.digest(egress-mac)[:16]
         secrets.egress_mac.update(header_mac_seed);
         let header_mac = &secrets.egress_mac.clone().finalize()[..16];
+        debug!("header_mac is {:?} ", header_mac);
 
-        debug!("Header is {:?} ", header_buf.as_ref());
 
-        debug!("Header mac is {:?} ", header_mac);
+        // debug!("Header is {:?} ", header_buf.as_ref());
+
+        // debug!("Header mac is {:?} ", header_mac);
         let mut out = BytesMut::default();
         out.reserve(32);
         out.extend_from_slice(&header_buf);
@@ -161,7 +174,7 @@ impl RLPx {
         encrypted[..data.len()].copy_from_slice(data);
 
         //frame-ciphertext = aes(aes-secret, frame-data || frame-padding)
-        secrets.aes_secret.apply_keystream(encrypted);
+        secrets.aes_keystream_egress.apply_keystream(encrypted);
         // egress-mac = keccak256.update(egress-mac, frame-ciphertext)
         secrets.egress_mac.update(encrypted);
         // frame-mac-seed = aes(mac-secret, keccak256.digest(egress-mac)[:16]) ^ keccak256.digest(egress-mac)[:16]
@@ -169,7 +182,7 @@ impl RLPx {
         let mut egress_mac_digest: [u8; 16] = [0;16];
         egress_mac_digest.copy_from_slice(&egress_mac[0..16]);
         let mut egress_mac_aes =  egress_mac_digest.clone();
-        secrets.aes_secret.apply_keystream(&mut egress_mac_aes);
+        secrets.aes_keystream_egress.apply_keystream(&mut egress_mac_aes);
         let mut frame_mac_seed: [u8; 16] = [0;16];
         for i in 0..frame_mac_seed.len() {
             frame_mac_seed[i] = egress_mac_aes[i] ^ egress_mac_digest[i];

@@ -39,8 +39,9 @@ pub struct HandshakeSecrets {
     pub static_shared_secret: H256,
     pub ephemeral_key: H256,
     pub shared_secret: H256,
-    pub aes_secret: Aes256Ctr64BE,
-    pub mac_secret: Aes256Ctr64BE,
+    pub aes_keystream_ingress: Aes256Ctr64BE,
+    pub aes_keystream_egress: Aes256Ctr64BE,
+    pub mac_secret: aes::Aes256,
     pub ingress_mac: Keccak256,
     pub egress_mac: Keccak256,
 }
@@ -299,21 +300,24 @@ impl ECIES {
 
         let mac_secret = Self::keccak256_hash(&[ephemeral_key.as_bytes(), aes_secret.as_bytes()]);
 
-        let ingress_mac:H256;
-        let egress_mac:H256;
+        let mut ingress_mac = Keccak256::new();
+        let mut egress_mac = Keccak256::new();
 
 
         match self.connection_direction {
             ECIESDirection::Incoming => 
             {
-                ingress_mac = Self::keccak256_hash(&[(mac_secret ^ self.resp_nonce).as_bytes(), &self.auth]);
-                egress_mac = Self::keccak256_hash(&[(mac_secret ^ self.init_nonce).as_bytes(), &self.ack]);
+                ingress_mac.update(mac_secret ^ self.resp_nonce);
+                ingress_mac.update(&self.auth);
+                egress_mac.update(mac_secret ^ self.init_nonce);
+                egress_mac.update(&self.ack);
             }
             ECIESDirection::Outgoing =>
             {
-
-                egress_mac = Self::keccak256_hash(&[(mac_secret ^ self.resp_nonce).as_bytes(), &self.auth]);
-                ingress_mac = Self::keccak256_hash(&[(mac_secret ^ self.init_nonce).as_bytes(), &self.ack]);
+                egress_mac.update(mac_secret ^ self.resp_nonce);
+                egress_mac.update(&self.auth);
+                ingress_mac.update(mac_secret ^ self.init_nonce);
+                ingress_mac.update(&self.ack);
             }
         }
 
@@ -329,34 +333,37 @@ impl ECIES {
         // );
         // debug!("ephemeral_key is: {:?}", ephemeral_key.as_bytes());
         // debug!("shared_secret is: {:?}", shared_secret.as_bytes());
-        debug!("aes_secret is: {:?}", aes_secret.as_bytes());
-        // debug!("mac_secret is: {:?}", mac_secret.as_bytes());
-        // debug!("egress_mac is: {:?}", egress_mac.as_bytes());
-        // debug!("ingress_mac is: {:?}", ingress_mac.as_bytes());
+        // debug!("aes_secret is: {:?}", aes_secret.as_bytes());
+        debug!("mac_secret is: {:?}", mac_secret.as_bytes());
 
         // debug!("shared_secret is: {:?}", shared_secret.as_bytes());
         // debug!("mac_secret is: {:?}", mac_secret.as_bytes());
         // debug!("resp_nonce is: {:?}", self.resp_nonce.as_bytes());
         // debug!("init_nonce is: {:?}", self.init_nonce.as_bytes());
 
+        debug!(" Egress_mac is: {:?}", H256::from(egress_mac.clone().finalize().as_ref()));
+        // debug!("ingress_mac is: {:?}", ingress_mac.as_bytes());
 
-        let mut ingress_mac_hasher = Keccak256::new();
-        ingress_mac_hasher.update(ingress_mac);
-        let mut egress_mac_hasher = Keccak256::new();
-        egress_mac_hasher.update(egress_mac);
+        // let mut ingress_mac_hasher = Keccak256::new();
+        // ingress_mac_hasher.update(ingress_mac);
+        // let mut egress_mac_hasher = Keccak256::new_from_slice(egress_mac);
+        // egress_mac_hasher.
 
         // Apparently, the keystream has the IV initialized with 0. This, I did not see in the documentation. 
         let iv = H128::default();
 
+        // The mac secret AES encryption is running in block mode, whereas the AES ingress/outgress is running in keystream mode.
+        let mac_cypher = <aes::Aes256 as aes::cipher::KeyInit>::new(mac_secret.as_ref().into());
 
         HandshakeSecrets {
             static_shared_secret,
             ephemeral_key,
             shared_secret,
-            aes_secret: Aes256Ctr64BE::new(aes_secret.as_ref().into(), iv.as_ref().into()),
-            mac_secret: Aes256Ctr64BE::new(mac_secret.as_ref().into(), iv.as_ref().into()),
-            ingress_mac: ingress_mac_hasher,
-            egress_mac: egress_mac_hasher,
+            aes_keystream_ingress: Aes256Ctr64BE::new(aes_secret.as_ref().into(), iv.as_ref().into()),
+            aes_keystream_egress: Aes256Ctr64BE::new(aes_secret.as_ref().into(), iv.as_ref().into()),
+            mac_secret: mac_cypher,
+            ingress_mac: ingress_mac,
+            egress_mac: egress_mac,
         }
     }
 }
