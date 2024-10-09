@@ -112,7 +112,6 @@ impl RLPx {
     }
 
     fn write_frame(&mut self, data: &[u8]) -> BytesMut {
-
         // frame = header-ciphertext || header-mac || frame-ciphertext || frame-mac
         // header = frame-size || header-data || header-padding
         // header-data = [capability-id, context-id]
@@ -145,9 +144,6 @@ impl RLPx {
         secrets.egress_mac.update(header_mac_seed);
         let header_mac = &secrets.egress_mac.clone().finalize()[..16];
 
-        // debug!("Header is {:?} ", header_buf.as_ref());
-
-        // debug!("Header mac is {:?} ", header_mac);
         let mut out = BytesMut::default();
         out.reserve(32);
         out.extend_from_slice(&header_buf);
@@ -312,10 +308,10 @@ impl Decoder for RLPx {
                 if src.is_empty() {
                     return Ok(None);
                 }
-                let decrypted = self
+                let _decrypted = self
                     .ecies
                     .decrypt(src)
-                    .map_err(|e| debug!("Frame decrypt Error {:?}", e));
+                    .map_err(|e| debug!("Frame decrypt Error: {:?}", e));
         
                 self.secrets = Some(self.ecies.get_secrets());
                 self.rlpx_state = RlpxState::AuthAckRecieved;
