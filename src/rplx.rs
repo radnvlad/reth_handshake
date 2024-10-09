@@ -120,6 +120,9 @@ impl RLPx {
         // header = frame-size || header-data || header-padding
         let mut header_buf = BytesMut::new();
         header_buf.extend_from_slice(ZERO_HEADER);
+        // We're missing a byte from the length here. 
+        let x:u16 = data.len() as u16;
+        header_buf[1..3].copy_from_slice(&x.to_be_bytes());
 
 
         let secrets = self.secrets.as_mut().unwrap();
