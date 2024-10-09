@@ -197,20 +197,20 @@ impl RLPx {
         data_in: &'a mut [u8],
     ) -> Result<&'a mut [u8], &'static str> {
         const FRAME_HEADER_CIPHERTEXT_SIZE: usize = 16;
-        const FRAME_HEADER_MAC_SIZE: usize = 16;
+        const FRAME_MAC_SIZE: usize = 16;
 
-        // // frame = header-ciphertext || header-mac || frame-ciphertext || frame-mac
-        // let (header_ciphertext, rest) = data_in
-        // .split_at_mut_checked(FRAME_HEADER_CIPHERTEXT_SIZE)
-        // .ok_or("No header ciphertext! ")?;
+        // frame = header-ciphertext || header-mac || frame-ciphertext || frame-mac
+        let (header_ciphertext, rest) = data_in
+            .split_at_mut_checked(FRAME_HEADER_CIPHERTEXT_SIZE)
+            .ok_or("No header ciphertext! ")?;
 
-        // let (header_mac, mac) = rest
-        // .split_at_mut_checked(FRAME_HEADER_MAC_SIZE)
-        // .ok_or("No header MAC ")?;
+        let (header_mac, rest) = rest
+            .split_at_mut_checked(FRAME_MAC_SIZE)
+            .ok_or("No header MAC ")?;
 
-        // let (frame_ciphertext, frame_mac) = rest
-        // .split_at_mut_checked((rest.len() - FRAME_HEADER_MAC_SIZE))
-        // .ok_or("No frame MAC ")?;
+        let (frame_ciphertext, frame_mac) = rest
+            .split_at_mut_checked((rest.len() - FRAME_MAC_SIZE))
+            .ok_or("No frame MAC ")?;
 
         // let digest = Self::hash_digest(&self.secrets.unwrap().ingress_mac);
 
@@ -320,10 +320,9 @@ impl Decoder for RLPx {
             }
             RlpxState::AuthAckRecieved => {
                 debug!("We're decoding frame!! ");
-                todo!();
                 // debug!("Raw frame is {:?} ", src.as_mut());
 
-                // self.decode_frame(src);
+                self.decode_frame(src);
             }
             _ => {
                 debug!("Invalid frame!! ");
