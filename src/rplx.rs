@@ -212,10 +212,8 @@ impl RLPx {
             .split_at_mut_checked((rest.len() - FRAME_MAC_SIZE))
             .ok_or("No frame MAC ")?;
 
-
-        // Get a local reference so it's simpler and I don't have to unwrap it every time. 
+        // Get a local reference so it's simpler and I don't have to unwrap it every time.
         let secrets = self.secrets.as_mut().unwrap();
-
 
         // According to https://github.com/ethereum/devp2p/blob/master/rlpx.md the handshake works like this:
         // header-mac-seed = aes(mac-secret, keccak256.digest(egress-mac)[:16]) ^ header-ciphertext
@@ -240,7 +238,6 @@ impl RLPx {
         }
         // debug!("header_mac_seed: {:?}", header_mac_seed);
 
-
         // egress-mac = keccak256.update(egress-mac, header-mac-seed)
         // header-mac = keccak256.digest(egress-mac)[:16]
         secrets.ingress_mac.update(header_mac_seed);
@@ -255,10 +252,11 @@ impl RLPx {
             return Err("Header MAC mismatch!");
         }
         debug!("Header MAC matches");
-        secrets.aes_keystream_ingress.apply_keystream(header_ciphertext);
+        secrets
+            .aes_keystream_ingress
+            .apply_keystream(header_ciphertext);
 
         //TODO: parse frame header!
-
 
         // egress-mac = keccak256.update(egress-mac, frame-ciphertext)
         secrets.ingress_mac.update(&frame_ciphertext);
@@ -284,16 +282,16 @@ impl RLPx {
         // frame-mac = keccak256.digest(egress-mac)[:16]
         let frame_mac_computed = &secrets.ingress_mac.clone().finalize()[..16];
 
-
         if frame_mac_computed != frame_mac {
             return Err("Frame MAC mismatch!");
         }
         debug!("Frame MAC matches");
-        
-        debug!("frame_ciphertext pre-de-enc:  {:?}", frame_ciphertext);
-        secrets.aes_keystream_ingress.apply_keystream(frame_ciphertext);
-        debug!("frame_ciphertext de-enc:  {:?}", frame_ciphertext);
 
+        debug!("frame_ciphertext pre-de-enc:  {:?}", frame_ciphertext);
+        secrets
+            .aes_keystream_ingress
+            .apply_keystream(frame_ciphertext);
+        debug!("frame_ciphertext de-enc:  {:?}", frame_ciphertext);
 
         Err("NotImpl")
     }
@@ -375,7 +373,7 @@ impl Decoder for RLPx {
         // It seems we need to validate full frame and clear only the frame
         //   data we processed. There are some issues with what I'm doing here,
         //   so caveat emptor. To be addressed after handshake works properly.
-        // We proooobably need to process header before frame data.   
+        // We proooobably need to process header before frame data.
         if src.is_empty() {
             return Ok(None);
         }
@@ -394,7 +392,6 @@ impl Decoder for RLPx {
                 return Ok(Some(RLPx_Message::AuthAck));
             }
             RlpxState::AuthAckRecieved => {
-
                 debug!("We're decoding frame!! ");
                 debug!("Raw frame is {:?} ", src.as_mut());
 
@@ -404,7 +401,7 @@ impl Decoder for RLPx {
             _ => {
                 debug!("Invalid frame!! ");
                 panic!();
-                return Ok(None)
+                return Ok(None);
             }
         }
 

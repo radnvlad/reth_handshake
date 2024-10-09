@@ -156,12 +156,10 @@ async fn handle_session(
     framed.next().await;
     debug!("We've recieved Hello!");
 
-
     loop {
         // debug!("Main Looop!!");
 
         // framed.next().await;
         // debug!("Main Looop end!!");
-
     }
 }
