@@ -32,7 +32,6 @@ pub struct ECIES {
     resp_nonce: H256,
     auth: BytesMut,
     ack: BytesMut,
-    iv: H128,
 }
 
 #[derive(Clone)]
@@ -62,7 +61,6 @@ impl ECIES {
             resp_nonce: H256::random(),
             auth: BytesMut::new(),
             ack: BytesMut::new(),
-            iv: H128::random(),
         }
     }
 
@@ -127,7 +125,7 @@ impl ECIES {
         // S = Px where (Px, Py) = r * KB
         let shared_key = Self::agree(self.peer_public_key, random_secret_key);
         // Generate initialization vector, each package has a new, spanking fresh iv
-        let iv = self.iv;
+        let iv = H128::random();
 
         // kE || kM = KDF(S, 32)
         let (encryption_key, mac_key) = Self::derive_keys(&shared_key)?;
@@ -331,7 +329,7 @@ impl ECIES {
         // );
         // debug!("ephemeral_key is: {:?}", ephemeral_key.as_bytes());
         // debug!("shared_secret is: {:?}", shared_secret.as_bytes());
-        // debug!("aes_secret is: {:?}", aes_secret.as_bytes());
+        debug!("aes_secret is: {:?}", aes_secret.as_bytes());
         // debug!("mac_secret is: {:?}", mac_secret.as_bytes());
         // debug!("egress_mac is: {:?}", egress_mac.as_bytes());
         // debug!("ingress_mac is: {:?}", ingress_mac.as_bytes());
@@ -347,12 +345,16 @@ impl ECIES {
         let mut egress_mac_hasher = Keccak256::new();
         egress_mac_hasher.update(egress_mac);
 
+        // Apparently, the keystream has the IV initialized with 0. This, I did not see in the documentation. 
+        let iv = H128::default();
+
+
         HandshakeSecrets {
             static_shared_secret,
             ephemeral_key,
             shared_secret,
-            aes_secret: Aes256Ctr64BE::new(aes_secret.as_ref().into(), self.iv.as_ref().into()),
-            mac_secret: Aes256Ctr64BE::new(mac_secret.as_ref().into(), self.iv.as_ref().into()),
+            aes_secret: Aes256Ctr64BE::new(aes_secret.as_ref().into(), iv.as_ref().into()),
+            mac_secret: Aes256Ctr64BE::new(mac_secret.as_ref().into(), iv.as_ref().into()),
             ingress_mac: ingress_mac_hasher,
             egress_mac: egress_mac_hasher,
         }

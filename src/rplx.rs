@@ -141,7 +141,9 @@ impl RLPx {
         secrets.egress_mac.update(header_mac_seed);
         let header_mac = &secrets.egress_mac.clone().finalize()[..16];
 
+        debug!("Header is {:?} ", header_buf.as_ref());
 
+        debug!("Header mac is {:?} ", header_mac);
         let mut out = BytesMut::default();
         out.reserve(32);
         out.extend_from_slice(&header_buf);
