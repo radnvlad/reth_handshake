@@ -124,14 +124,6 @@ async fn handle_session(
     };
 
     let mut rplx_tp = RLPx::new(private_key, peer_public_key);
-    // We derive the shared secret S = Px
-    //   where (Px, Py) = r * KB
-    // And then we handle it as a 256bit hash.
-    let shared_key = ECIES::agree(peer_public_key, private_key);
-
-    // We create the public key from the private key
-    let our_public_key = PublicKey::from_secret_key(SECP256K1, &private_key);
-    rplx_tp.construct_auth_request(shared_key, our_public_key);
 
     let mut framed = Framed::new(stream, rplx_tp);
     debug!("We're sending Auth!");

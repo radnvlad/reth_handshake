@@ -38,7 +38,7 @@ pub struct RLPx {
     secrets: Option<HandshakeSecrets>,
 }
 
-const PROTOCOL_VERSION: usize = 5;
+pub const PROTOCOL_VERSION: usize = 5;
 const ZERO_HEADER: &[u8; 16] = &[0, 0, 148, 194, 128, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // Lifted from geth
 
 impl RLPx {
@@ -52,43 +52,6 @@ impl RLPx {
             public_key: public_key,
             secrets: None,
         }
-    }
-
-    pub fn construct_auth_request(&mut self, derived_shared_key: H256, our_public_key: PublicKey) {
-        // Generate random keypair to for ECDH.
-        let private_ephemeral_key = self.ecies.get_private_ephemeral_key();
-
-        // Generate random initiator nonce.
-        let nonce = self.ecies.get_nonce();
-
-        let msg = derived_shared_key ^ nonce;
-
-        let (rec_id, sig) = SECP256K1
-            .sign_ecdsa_recoverable(
-                &secp256k1::Message::from_digest_slice(msg.as_bytes()).unwrap(),
-                &private_ephemeral_key,
-            )
-            .serialize_compact();
-
-        let mut signature: [u8; 65] = [0; 65];
-        signature[..64].copy_from_slice(&sig);
-        signature[64] = rec_id.to_i32() as u8;
-
-        let full_pub_key = our_public_key.serialize_uncompressed();
-        let public_key = &full_pub_key[1..];
-
-        // auth-body = [sig, initiator-pubk, initiator-nonce, auth-vsn, ...]
-        let mut stream: RlpStream = RlpStream::new_list(4);
-        stream.append(&&signature[..]);
-        stream.append(&public_key);
-        stream.append(&nonce.as_bytes());
-        // auth-vsn = 4
-        stream.append(&PROTOCOL_VERSION);
-
-        self.auth_request.clear();
-
-        self.auth_request
-            .extend_from_slice(&self.ecies.encrypt(stream.out()).unwrap());
     }
 
     pub fn hash_digest(mac: &H256) -> H128 {
@@ -328,7 +291,7 @@ impl Encoder<RLPx_Message> for RLPx {
             RLPx_Message::Auth => {
                 dst.clear();
 
-                dst.extend_from_slice(&self.auth_request);
+                dst.extend_from_slice(self.ecies.get_auth_request());
 
                 self.rlpx_state = RlpxState::AuthSent;
             }
@@ -368,7 +331,7 @@ impl Decoder for RLPx {
         //   It seems we need to validate full frame and clear only the frame
         // data we processed. There are some issues with what I'm doing here,
         // so caveat emptor. To be addressed after handshake works properly.
-        //   We proooobably need to process header before frame data in order to 
+        //   We proooobably need to process header before frame data in order to
         // insure frame integrity
         if src.is_empty() {
             return Ok(None);

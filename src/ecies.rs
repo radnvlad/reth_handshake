@@ -1,8 +1,9 @@
+use crate::rplx::PROTOCOL_VERSION;
 use aes::cipher::{KeyIvInit, StreamCipher};
 use ethereum_types::{H128, H256};
 use hmac::{Hmac, Mac};
 use log::debug;
-use rlp::Rlp;
+use rlp::{Rlp, RlpStream};
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use sha2::{Digest, Sha256};
 use sha3::Keccak256;
@@ -62,14 +63,6 @@ impl ECIES {
         return SecretKey::new(&mut secp256k1::rand::thread_rng());
     }
 
-    pub fn get_private_ephemeral_key(&self) -> SecretKey {
-        self.ephemeral_priv_key
-    }
-
-    pub fn get_nonce(&self) -> H256 {
-        self.init_nonce
-    }
-
     // ECIES agree actually creates a secret point using the a private key and a peer public key
     pub fn agree(public_key: PublicKey, private_key: SecretKey) -> H256 {
         return H256::from_slice(
@@ -112,6 +105,48 @@ impl ECIES {
         H256::from_slice(&hmac.finalize().into_bytes())
     }
 
+    pub fn get_auth_request(&mut self) -> &BytesMut {
+        // We create the public key from our private key
+        let our_public_key = PublicKey::from_secret_key(SECP256K1, &self.our_private_key);
+        // We derive the shared secret S = Px
+        //   where (Px, Py) = r * KB
+        // And then we handle it as a 256bit hash.
+        let derived_shared_key = ECIES::agree(self.peer_public_key, self.our_private_key);
+
+        let msg = derived_shared_key ^ self.init_nonce;
+
+        let (rec_id, sig) = SECP256K1
+            .sign_ecdsa_recoverable(
+                &secp256k1::Message::from_digest_slice(msg.as_bytes()).unwrap(),
+                &self.ephemeral_priv_key,
+            )
+            .serialize_compact();
+
+        let mut signature: [u8; 65] = [0; 65];
+        signature[..64].copy_from_slice(&sig);
+        signature[64] = rec_id.to_i32() as u8;
+
+        let full_pub_key = our_public_key.serialize_uncompressed();
+        let public_key = &full_pub_key[1..];
+
+        // auth-body = [sig, initiator-pubk, initiator-nonce, auth-vsn, ...]
+        let mut stream: RlpStream = RlpStream::new_list(4);
+        stream.append(&&signature[..]);
+        stream.append(&public_key);
+        stream.append(&self.init_nonce.as_bytes());
+        // auth-vsn = 4
+        stream.append(&PROTOCOL_VERSION);
+
+        self.auth.clear();
+
+        let auth_encrypted = self.encrypt(stream.out()).unwrap();
+
+        self.auth.extend_from_slice(&auth_encrypted);
+        debug!("Auth frame is: {:?}", self.auth.as_ref());
+
+        &self.auth
+    }
+
     pub fn encrypt<'a>(&mut self, data_to_encrypt: BytesMut) -> Result<BytesMut, &'static str> {
         // R = r * G
         let random_secret_key = Self::generate_random_secret_key();
@@ -140,16 +175,6 @@ impl ECIES {
         data_encrypted_out.extend_from_slice(iv.as_bytes());
         data_encrypted_out.extend_from_slice(&encrypted_data);
         data_encrypted_out.extend_from_slice(tag.as_bytes());
-        match self.connection_direction {
-            ECIESDirection::Outgoing => {
-                self.auth.clear();
-                self.auth.extend(&data_encrypted_out);
-            }
-            ECIESDirection::Incoming => {
-                self.ack.clear();
-                self.ack.extend(&data_encrypted_out);
-            }
-        }
         Ok(data_encrypted_out)
     }
 
@@ -301,9 +326,8 @@ impl ECIES {
                 ingress_mac.update(&self.ack);
             }
         }
-
-        // debug!("ack is: {:?}", self.ack.as_ref());
         // debug!("Auth is: {:?}", self.auth.as_ref());
+        // debug!("ack is: {:?}", self.ack.as_ref());
 
         // debug!(
         //     "static_shared_secret is: {:?}",
@@ -312,7 +336,7 @@ impl ECIES {
         // debug!("ephemeral_key is: {:?}", ephemeral_key.as_bytes());
         // debug!("shared_secret is: {:?}", shared_secret.as_bytes());
         // debug!("aes_secret is: {:?}", aes_secret.as_bytes());
-        debug!("mac_secret is: {:?}", mac_secret.as_bytes());
+        // debug!("mac_secret is: {:?}", mac_secret.as_bytes());
 
         // debug!("shared_secret is: {:?}", shared_secret.as_bytes());
         // debug!("mac_secret is: {:?}", mac_secret.as_bytes());
