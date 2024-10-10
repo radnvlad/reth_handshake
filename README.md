@@ -10,4 +10,4 @@ It should take a full enode format, it is thought in order to be capable to conn
 
 Enodes can be grabbed from https://ethernodes.org/
 
-I ran and tested using a local geth instance with logging, public enodes I noticed that sometimes refuse opening the TCP connection. 
+I ran and tested using a local geth instance with logging,  I noticed that public enodes sometimes refuse opening the TCP connection. 
