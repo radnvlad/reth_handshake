@@ -4,11 +4,10 @@ use crate::{
 };
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt, KeyInit};
 use alloy_primitives::B512;
-use alloy_rlp::{Buf, BytesMut, Encodable};
+use alloy_rlp::{Buf, BytesMut, Encodable,Decodable};
 use ctr::cipher::KeyIvInit;
 use ctr::cipher::StreamCipher;
 use ethereum_types::{H128, H256};
-use hmac::{Hmac, Mac};
 use log::{debug, error, info, warn};
 use rlp::RlpStream;
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
@@ -251,7 +250,7 @@ impl RLPx {
             .aes_keystream_ingress
             .apply_keystream(frame_ciphertext);
 
-        Err("NotImpl")
+        Ok(frame_ciphertext)
     }
 
     pub fn get_state(&self) -> RlpxState {
@@ -275,6 +274,25 @@ impl RLPx {
         msg.encode(&mut encoded_hello);
 
         self.write_frame(&encoded_hello)
+    }
+
+
+    fn decode_frame_data(&mut self, frame: &[u8]) -> Result<RLPx_Message,  &'static str> {
+
+        let (message_id, message) = frame.split_at(1);
+        let message_id = u8::decode(&mut &message_id[..]).map_err(|_|" RLP stream decode error! ")?;
+
+        debug!("Message ID received: {}", message_id);
+
+        match message_id{
+            Hello::ID => {
+                let hello = Hello::decode(&mut &message[..]);
+                info!("Hello message recieved from target node: {:?}", hello.unwrap());
+                return Ok(RLPx_Message::Hello);
+            },
+
+            _ => {panic!();}
+        }
     }
 }
 
@@ -350,8 +368,11 @@ impl Decoder for RLPx {
             RlpxState::AuthAckRecieved => {
                 debug!("We're decoding a frame... ");
 
-                self.decode_frame(src);
-                return Ok(Some(RLPx_Message::Hello));
+                let decrypted_frame = self.decode_frame(src);
+
+                let message_id =  self.decode_frame_data(decrypted_frame.unwrap()).unwrap();
+                
+                return Ok(Some(message_id));
             }
             _ => {
                 debug!("Invalid frame!! ");

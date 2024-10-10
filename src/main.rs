@@ -5,6 +5,7 @@ use futures::StreamExt;
 use log::{debug, error, info};
 use messages::RLPx_Message;
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
+use std::process;
 use std::{
     env,
     fmt::Error,
@@ -22,6 +23,9 @@ mod messages;
 mod rplx;
 
 fn main() {
+    if env::var("RUST_LOG").is_err() {
+        env::set_var("RUST_LOG", "info")
+    }
     env_logger::init();
     let peers_eip = match get_peers() {
         Ok(x) => x,
@@ -145,8 +149,7 @@ async fn handle_session(
     debug!("We're waiting Hello!");
     framed.next().await;
 
-    debug!("We've recieved Hello! Handshake (kinda') established. ");
+    info!("We've recieved Hello! Handshake (kinda') established. ");
+    process::exit(1);
 
-    loop {
-    }
 }
