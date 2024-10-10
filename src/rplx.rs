@@ -213,7 +213,6 @@ impl RLPx {
         if header_mac_computed != header_mac {
             return Err("Header MAC mismatch!");
         }
-        debug!("Header MAC matches");
         secrets
             .aes_keystream_ingress
             .apply_keystream(header_ciphertext);
@@ -247,13 +246,10 @@ impl RLPx {
         if frame_mac_computed != frame_mac {
             return Err("Frame MAC mismatch!");
         }
-        debug!("Frame MAC matches");
 
-        debug!("frame_ciphertext pre-de-enc:  {:?}", frame_ciphertext);
         secrets
             .aes_keystream_ingress
             .apply_keystream(frame_ciphertext);
-        debug!("frame_ciphertext de-enc:  {:?}", frame_ciphertext);
 
         Err("NotImpl")
     }
@@ -324,7 +320,6 @@ impl Decoder for RLPx {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        debug!("We're decoding!! State is {:?}", self.rlpx_state);
 
         // See example here:
         // https://docs.rs/tokio-util/latest/tokio_util/codec/index.html
@@ -338,6 +333,8 @@ impl Decoder for RLPx {
         }
         match self.rlpx_state {
             RlpxState::AuthSent => {
+                debug!("We're decoding authAck... ");
+
                 // debug!("We're decoding !! Raw Data is: {:?} ", src);
                 let _decrypted = self
                     .ecies
@@ -351,8 +348,7 @@ impl Decoder for RLPx {
                 return Ok(Some(RLPx_Message::AuthAck));
             }
             RlpxState::AuthAckRecieved => {
-                debug!("We're decoding frame!! ");
-                debug!("Raw frame is {:?} ", src.as_mut());
+                debug!("We're decoding a frame... ");
 
                 self.decode_frame(src);
                 return Ok(Some(RLPx_Message::Hello));

@@ -40,7 +40,7 @@ fn get_peers() -> Result<Vec<(PublicKey, SocketAddr)>, &'static str> {
     let mut nodes: Vec<(PublicKey, SocketAddr)> = Vec::new();
 
     for enode in env::args().skip(1) {
-        debug!("Enode argument is: {:?}", enode);
+        info!("Enode argument is: {:?}", enode);
 
         let (enode_prefix, enode_data) = enode
             .split_once(ENODE_PREFIX)
@@ -88,7 +88,7 @@ async fn multi_connection_runner(peers: Vec<(PublicKey, SocketAddr)>) {
 
     // let mut futures_list: Vec<impt> = Vec::new();
     for (public_key, ip_address) in peers {
-        debug!("Peer public key is {:?}", public_key);
+        info!("Peer public key is {:?}", public_key);
         let _ = handle_session(private_key, public_key, ip_address).await;
     }
 }
@@ -126,15 +126,14 @@ async fn handle_session(
     let mut rplx_tp = RLPx::new(private_key, peer_public_key);
 
     let mut framed = Framed::new(stream, rplx_tp);
-    debug!("We're sending Auth!");
 
+    debug!("We're sending Auth!");
     framed
         .send(RLPx_Message::Auth)
         .await
         .map_err(|_| "Frame send Error ")?;
 
     debug!("We're recieving ack!");
-
     framed.next().await;
 
     debug!("We're sending Hello!");
@@ -142,16 +141,12 @@ async fn handle_session(
         .send(RLPx_Message::Hello)
         .await
         .map_err(|_| "Frame send Error ")?;
-    debug!("We sent Hello!");
-    debug!("We're waiting Hello!");
 
+    debug!("We're waiting Hello!");
     framed.next().await;
-    debug!("We've recieved Hello!");
+
+    debug!("We've recieved Hello! Handshake (kinda') established. ");
 
     loop {
-        // debug!("Main Looop!!");
-
-        // framed.next().await;
-        // debug!("Main Looop end!!");
     }
 }

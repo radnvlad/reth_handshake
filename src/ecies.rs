@@ -2,7 +2,7 @@ use crate::rplx::PROTOCOL_VERSION;
 use aes::cipher::{KeyIvInit, StreamCipher};
 use ethereum_types::{H128, H256};
 use hmac::{Hmac, Mac};
-use log::debug;
+use log::{debug, info};
 use rlp::{Rlp, RlpStream};
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use sha2::{Digest, Sha256};
@@ -142,7 +142,6 @@ impl ECIES {
         let auth_encrypted = self.encrypt(stream.out()).unwrap();
 
         self.auth.extend_from_slice(&auth_encrypted);
-        debug!("Auth frame is: {:?}", self.auth.as_ref());
 
         &self.auth
     }
@@ -202,8 +201,6 @@ impl ECIES {
         let (pub_data, rest) = rest
             .split_at_mut_checked(PUBLIC_KEY_SIZE)
             .ok_or("No public key data!")?;
-
-        // debug!("Extracted remote pub_data is: {:?}", pub_data);
 
         let (iv, rest) = rest
             .split_at_mut_checked(IV_SIZE)
@@ -326,38 +323,6 @@ impl ECIES {
                 ingress_mac.update(&self.ack);
             }
         }
-        // debug!("Auth is: {:?}", self.auth.as_ref());
-        // debug!("ack is: {:?}", self.ack.as_ref());
-
-        // debug!(
-        //     "static_shared_secret is: {:?}",
-        //     static_shared_secret.as_bytes()
-        // );
-        // debug!("ephemeral_key is: {:?}", ephemeral_key.as_bytes());
-        // debug!("shared_secret is: {:?}", shared_secret.as_bytes());
-        // debug!("aes_secret is: {:?}", aes_secret.as_bytes());
-        // debug!("mac_secret is: {:?}", mac_secret.as_bytes());
-
-        // debug!("shared_secret is: {:?}", shared_secret.as_bytes());
-        // debug!("mac_secret is: {:?}", mac_secret.as_bytes());
-        // debug!("resp_nonce is: {:?}", self.resp_nonce.as_bytes());
-        // debug!("init_nonce is: {:?}", self.init_nonce.as_bytes());
-
-        // debug!(
-        //     " Egress_mac is: {:?}",
-        //     H256::from(egress_mac.clone().finalize().as_ref())
-        // );
-
-        // debug!(
-        //     " Ingress_mac is: {:?}",
-        //     H256::from(ingress_mac.clone().finalize().as_ref())
-        // );
-        // debug!("ingress_mac is: {:?}", ingress_mac.as_bytes());
-
-        // let mut ingress_mac_hasher = Keccak256::new();
-        // ingress_mac_hasher.update(ingress_mac);
-        // let mut egress_mac_hasher = Keccak256::new_from_slice(egress_mac);
-        // egress_mac_hasher.
 
         // Apparently, the keystream has the IV initialized with 0. This, I did not see in the documentation.
         let iv = H128::default();
@@ -365,6 +330,8 @@ impl ECIES {
         // The mac secret AES encryption is running in block mode, whereas the AES ingress/outgress is running in keystream mode.
         let mac_cypher = <aes::Aes256 as aes::cipher::KeyInit>::new(mac_secret.as_ref().into());
 
+        info!(" Created ecies secrets... ");
+        
         HandshakeSecrets {
             aes_keystream_ingress: Aes256Ctr64BE::new(
                 aes_secret.as_ref().into(),
