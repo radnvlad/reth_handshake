@@ -24,7 +24,7 @@ mod rplx;
 
 fn main() {
     if env::var("RUST_LOG").is_err() {
-        env::set_var("RUST_LOG", "info")
+        env::set_var("RUST_LOG", "trace")
     }
     env_logger::init();
     let peers_eip = match get_peers() {
@@ -129,7 +129,7 @@ async fn handle_session(
 
     let mut rplx_tp = RLPx::new(private_key, peer_public_key);
 
-    let mut framed = Framed::new(stream, rplx_tp);
+    let mut framed: Framed<TcpStream, RLPx> = Framed::new(stream, rplx_tp);
 
     debug!("We're sending Auth!");
     framed
@@ -138,10 +138,35 @@ async fn handle_session(
         .map_err(|_| "Frame send Error ")?;
 
     debug!("We're recieving ack!");
-    framed.next().await;
+
+    loop {
+        match framed.next().await {
+            Some(Ok(message)) => match message {
+                RLPx_Message::Auth =>  {}
+                RLPx_Message::AuthAck => {}
+                RLPx_Message::Hello => {}
+                RLPx_Message::Ping => {}
+                RLPx_Message::Pong => {}
+                RLPx_Message::Disconnect(Reason) => {}
+                RLPx_Message::Status(Status) => {}
+            }
+                
+            Some(Err(_)) => {
+                return Err("Codec Error");} 
+            None => return Err("Peer closed socket connection"),
+        }
+    }  
+
+    //     match result {
+    //         Some(Ok(RLPx_Message::AuthAck)) => {
+    //                 debug!("We got back ack! ");break;}
+    //         None => {    debug!("We got back None! ");process::exit(1);}
+    //         _ => process::exit(1),
+    //     }
+    // }
 
     debug!("We're sending Hello!");
-    framed
+    let x = framed
         .send(RLPx_Message::Hello)
         .await
         .map_err(|_| "Frame send Error ")?;
@@ -150,6 +175,6 @@ async fn handle_session(
     framed.next().await;
 
     info!("We've recieved Hello! Handshake (kinda') established. ");
-    process::exit(1);
+    process::exit(0);
 
 }
