@@ -170,7 +170,7 @@ async fn handle_session(
     loop {
         match framed.next().await {
             Some(Ok(message)) => match message {
-                RLPx_Message::Auth | RLPx_Message::AuthAck =>  return Err("Unexpected frame recieved"),
+                RLPx_Message::Auth | RLPx_Message::AuthAck =>  return Err("Unexpected ack/auth frame recieved"),
                 RLPx_Message::Hello => return Err("Unexpected hello frame recieved"),
                 RLPx_Message::Ping => {}
                 RLPx_Message::Pong => {}

@@ -1,4 +1,4 @@
-use std::io::{ErrorKind, Error};
+use std::{io::{Error, ErrorKind}, process};
 use crate::{
     ecies::{ECIESDirection, HandshakeSecrets, ECIES},
     messages::{Capability, Disconnect, Hello, Ping, Pong, RLPx_Message, Status},
@@ -344,7 +344,11 @@ impl RLPx {
                 return Ok(RLPx_Message::Hello);
             },
 
-            _ => {panic!();}
+            _ => {
+                info!("We probably got back the eth capabily status message, we can't handle it currently, just exit.");
+                process::exit(0);
+                return Err("TODO")
+            }
         }
     }
 }
