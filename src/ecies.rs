@@ -177,26 +177,28 @@ impl ECIES {
         Ok(data_encrypted_out)
     }
 
-    pub fn decrypt<'a>(&mut self, data_in: &'a mut [u8]) -> Result<&'a mut [u8], &'static str> {
+    pub fn decrypt<'a>(&mut self, data_in: &'a mut [u8]) -> Result<(&'a mut [u8], usize), &'static str> {
+
+        // Payload size.
+        let payload_size = u16::from_be_bytes([data_in[0], data_in[1]]) as usize;
+        let frame_size = payload_size+2;
+
+        if data_in.len() < payload_size + 2 {
+            return Err("Too small payload size");
+        }
+
         match self.connection_direction {
             ECIESDirection::Incoming => {
                 self.auth.clear();
-                self.auth.extend_from_slice(data_in);
+                self.auth.extend_from_slice(&data_in[..frame_size]);
             }
             ECIESDirection::Outgoing => {
                 self.ack.clear();
-                self.ack.extend_from_slice(data_in);
+                self.ack.extend_from_slice(&data_in[..frame_size]);
             }
         }
 
-        // Payload size.
-        let (payload_size, rest) = data_in.split_at_mut_checked(2).ok_or("No payload size!")?;
-
-        let payload_size = u16::from_be_bytes([payload_size[0], payload_size[1]]) as usize;
-
-        if rest.len() < payload_size {
-            return Err("Too small payload size");
-        }
+        let (_, rest) = data_in.split_at_mut_checked(2).ok_or("No payload size!")?;
 
         let (pub_data, rest) = rest
             .split_at_mut_checked(PUBLIC_KEY_SIZE)
@@ -251,7 +253,7 @@ impl ECIES {
 
         self.resp_nonce = H256::from_slice(&recipient_nonce);
 
-        Ok(encrypted_data)
+        Ok((encrypted_data, frame_size))
     }
 
     fn keccak256_hash(inputs: &[&[u8]]) -> H256 {

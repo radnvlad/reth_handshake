@@ -416,15 +416,15 @@ impl Decoder for RLPx {
                 debug!("We're decoding authAck... ");
 
                 // debug!("We're decoding !! Raw Data is: {:?} ", src);
-                let _decrypted = self
+                let (_decrypted, frame_size) = self
                     .ecies
                     .decrypt(src)
-                    .map_err(|e| debug!("Frame decrypt Error: {:?}", e));
+                    .map_err(|e| {debug!("Frame decrypt Error: {:?}", e); Error::from(ErrorKind::Other)})?;
 
                 self.secrets = Some(self.ecies.get_secrets());
                 self.rlpx_state = RlpxState::AuthAckRecieved;
                 // debug!("Raw data after Ack rx buffer is:  {:?} ", src.as_mut());
-                src.clear();
+                src.advance(frame_size);
 
                 self.frame_state = FrameState::DecodingHeader;
 
