@@ -348,8 +348,8 @@ impl Decoder for RLPx {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        debug!("We're decoding... Size of message is {:?}",src.len());
-        debug!("Msg data is {:?}",src.as_ref());
+        // debug!("We're decoding... Size of message is {:?}",src.len());
+        // debug!("Msg data is {:?}",src.as_ref());
 
         // See example here:
         // https://docs.rs/tokio-util/latest/tokio_util/codec/index.html
@@ -388,6 +388,7 @@ impl Decoder for RLPx {
                         let frame_ciphertext_size = self.decode_frame_header(src).map_err(|err|{
                             error!("Error decoding header: {:?} ", err);
                             Error::from(ErrorKind::Other)})?;
+
                         self.frame_state = FrameState::DecodingFrame(frame_ciphertext_size);
                         src.advance(FRAME_HEADER_CIPHERTEXT_SIZE+FRAME_MAC_SIZE);
                     }
@@ -400,15 +401,12 @@ impl Decoder for RLPx {
                     FrameState::DecodingFrame(frame_ciphertext_size) => {
                         if src.len() >= frame_ciphertext_size {
 
-                            debug!("Frame data is ... {:?}", src.as_ref());
-                            debug!("Frame data cut is ... {:?}", src[..frame_ciphertext_size].as_ref());
-
-                            let decrypted_frame = self.decode_frame_ciphertext(&mut src[..frame_ciphertext_size]).map_err(|err|{
+                            let decrypted_frame = self.decode_frame_ciphertext(src).map_err(|err|{
                                 error!("Error decrypting frame: {:?} ", err);
                                 Error::from(ErrorKind::Other)})?;
                                 
                             let message_id =  self.decode_frame_data(decrypted_frame).unwrap();
-                            src.advance(frame_ciphertext_size);
+                            src.advance(frame_ciphertext_size+FRAME_MAC_SIZE);
                             match message_id {
                                 RLPx_Message::Hello =>  {
                                     self.rlpx_state = RlpxState::Active;
