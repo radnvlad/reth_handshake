@@ -19,13 +19,19 @@ use tokio_util::codec::{Decoder, Encoder};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RlpxState {
-    WaitingConnection,
+    ExpectingConnection,
     AuthSent,
     AuthAckRecieved,
     HelloSent,
     HelloRecieved,
     Active,
     Disconnected,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FrameState {
+    DecodingHeader,
+    DecodingFrame(usize),
 }
 
 #[derive(Clone)]
@@ -35,21 +41,27 @@ pub struct RLPx {
     auth_request: BytesMut,
     ecies: ECIES,
     public_key: PublicKey,
+    frame_state: FrameState,
     secrets: Option<HandshakeSecrets>,
 }
 
 pub const PROTOCOL_VERSION: usize = 5;
 const ZERO_HEADER: &[u8; 16] = &[0, 0, 148, 194, 128, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // Lifted from geth
 
+
+const FRAME_HEADER_CIPHERTEXT_SIZE: usize = 16;
+const FRAME_MAC_SIZE: usize = 16;
+
 impl RLPx {
     pub fn new(our_private_key: SecretKey, peer_public_key: PublicKey) -> Self {
         let public_key = PublicKey::from_secret_key(SECP256K1, &our_private_key);
         Self {
-            rlpx_state: RlpxState::WaitingConnection,
+            rlpx_state: RlpxState::ExpectingConnection,
             direction: ECIESDirection::Outgoing,
             auth_request: BytesMut::new(), // todo
             ecies: ECIES::new(our_private_key, peer_public_key),
             public_key: public_key,
+            frame_state: FrameState::DecodingHeader,
             secrets: None,
         }
     }
@@ -137,12 +149,10 @@ impl RLPx {
         out
     }
 
-    pub fn decode_frame<'a>(
+    pub fn decode_frame_header<'a>(
         &mut self,
         data_in: &'a mut [u8],
-    ) -> Result<&'a mut [u8], &'static str> {
-        const FRAME_HEADER_CIPHERTEXT_SIZE: usize = 16;
-        const FRAME_MAC_SIZE: usize = 16;
+    ) -> Result<usize, &'static str> {
 
         // frame = header-ciphertext || header-mac || frame-ciphertext || frame-mac
         let (header_ciphertext, rest) = data_in
@@ -152,10 +162,6 @@ impl RLPx {
         let (header_mac, rest) = rest
             .split_at_mut_checked(FRAME_MAC_SIZE)
             .ok_or("No header MAC ")?;
-
-        let (frame_ciphertext, frame_mac) = rest
-            .split_at_mut_checked((rest.len() - FRAME_MAC_SIZE))
-            .ok_or("No frame MAC ")?;
 
         // Get a local reference so it's simpler and I don't have to unwrap it every time.
         let secrets = self.secrets.as_mut().unwrap();
@@ -192,17 +198,34 @@ impl RLPx {
         // debug!("header_ciphertext: {:?}", header_ciphertext);
         // debug!("header_mac_computed: {:?}", header_mac_computed);
         // debug!("header_mac:  {:?}", header_mac);
-
         if header_mac_computed != header_mac {
             debug!("RX Header MAC mismatch!");
             return Err("Header MAC mismatch!");
-
         }
+
         secrets
             .aes_keystream_ingress
             .apply_keystream(header_ciphertext);
 
-        //TODO: parse frame header!
+        debug!("Header data: {:?} ", header_ciphertext);
+
+        let payload_size = u32::from_be_bytes([0, header_ciphertext[0], header_ciphertext[1], header_ciphertext[2]]) as usize;
+        Ok(payload_size)
+
+    }
+
+    pub fn decode_frame_ciphertext<'a>(
+        &mut self,
+        data_in: &'a mut [u8],
+    ) -> Result<&'a mut [u8], &'static str> {
+        const FRAME_MAC_SIZE: usize = 16;
+
+        let (frame_ciphertext, frame_mac) = data_in
+            .split_at_mut_checked((data_in.len() - FRAME_MAC_SIZE))
+            .ok_or("No frame MAC, invalid frame length ")?;
+
+        // Get a local reference so it's simpler and I don't have to unwrap it every time.
+        let secrets = self.secrets.as_mut().unwrap();
 
         // egress-mac = keccak256.update(egress-mac, frame-ciphertext)
         secrets.ingress_mac.update(&frame_ciphertext);
@@ -229,7 +252,6 @@ impl RLPx {
         let frame_mac_computed = &secrets.ingress_mac.clone().finalize()[..16];
 
         if frame_mac_computed != frame_mac {
-
             debug!("RX Frame MAC mismatch!");
             return Err("Frame MAC mismatch!");
         }
@@ -326,6 +348,8 @@ impl Decoder for RLPx {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        debug!("We're decoding... Size of message is {:?}",src.len());
+        debug!("Msg data is {:?}",src.as_ref());
 
         // See example here:
         // https://docs.rs/tokio-util/latest/tokio_util/codec/index.html
@@ -351,27 +375,74 @@ impl Decoder for RLPx {
                 self.rlpx_state = RlpxState::AuthAckRecieved;
                 // debug!("Raw data after Ack rx buffer is:  {:?} ", src.as_mut());
                 src.clear();
+
+                self.frame_state = FrameState::DecodingHeader;
+
                 return Ok(Some(RLPx_Message::AuthAck));
             }
             RlpxState::AuthAckRecieved => {
                 debug!("We're decoding a Hello frame... ");
 
-                let decrypted_frame = self.decode_frame(src);
+                if self.frame_state == FrameState::DecodingHeader{
+                    if src.len() >= FRAME_HEADER_CIPHERTEXT_SIZE+FRAME_MAC_SIZE {
+                        let frame_ciphertext_size = self.decode_frame_header(src).map_err(|err|{
+                            error!("Error decoding header: {:?} ", err);
+                            Error::from(ErrorKind::Other)})?;
+                        self.frame_state = FrameState::DecodingFrame(frame_ciphertext_size);
+                        src.advance(FRAME_HEADER_CIPHERTEXT_SIZE+FRAME_MAC_SIZE);
+                    }
+                    else {
+                        // Call us back until we get a full header. 
+                        return Ok(None);
+                    }
+                }
+                return match self.frame_state {
+                    FrameState::DecodingFrame(frame_ciphertext_size) => {
+                        if src.len() >= frame_ciphertext_size {
 
-                let message_id =  self.decode_frame_data(decrypted_frame.unwrap()).unwrap();
-                self.rlpx_state = RlpxState::Active;
-                
-                src.clear();
-                return Ok(Some(message_id));
+                            debug!("Frame data is ... {:?}", src.as_ref());
+                            debug!("Frame data cut is ... {:?}", src[..frame_ciphertext_size].as_ref());
+
+                            let decrypted_frame = self.decode_frame_ciphertext(&mut src[..frame_ciphertext_size]).map_err(|err|{
+                                error!("Error decrypting frame: {:?} ", err);
+                                Error::from(ErrorKind::Other)})?;
+                                
+                            let message_id =  self.decode_frame_data(decrypted_frame).unwrap();
+                            src.advance(frame_ciphertext_size);
+                            match message_id {
+                                RLPx_Message::Hello =>  {
+                                    self.rlpx_state = RlpxState::Active;
+                                    Ok(Some(RLPx_Message::Hello))
+                                }
+                                _ => {
+                                    error!(" Unexpected message! We should have gotten a Hello!! ");
+                                    Err(Error::from(ErrorKind::Other))
+                                },
+                            }
+
+                        }
+                        else {
+                            // Call us back until we get a full header. 
+                            Ok(None)
+                        }
+
+                    },
+                    _ => {
+                        error!(" Unexpected state! We should not have gotter in this situation! ");
+                        Err(Error::from(ErrorKind::Other)) }
+                };
+            
             }
             RlpxState::Active => {
-                debug!("We're decoding a frame... ");
+                debug!("We're decoding a protocol frame... ");
 
-                let decrypted_frame = self.decode_frame(src);
+                todo!();
 
-                let message_id =  self.decode_frame_data(decrypted_frame.unwrap()).unwrap();
+                // let decrypted_frame = self.decode_frame(src);
+
+                // let message_id =  self.decode_frame_data(decrypted_frame.unwrap()).unwrap();
                 
-                return Ok(Some(message_id));
+                // return Ok(Some(message_id));
             }
             _ => {
                 debug!("Invalid frame!! ");
