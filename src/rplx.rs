@@ -199,15 +199,12 @@ impl RLPx {
         // debug!("header_mac_computed: {:?}", header_mac_computed);
         // debug!("header_mac:  {:?}", header_mac);
         if header_mac_computed != header_mac {
-            debug!("RX Header MAC mismatch!");
             return Err("Header MAC mismatch!");
         }
 
         secrets
             .aes_keystream_ingress
             .apply_keystream(header_ciphertext);
-
-        debug!("Header data: {:?} ", header_ciphertext);
 
         let mut payload_size = u32::from_be_bytes([0, header_ciphertext[0], header_ciphertext[1], header_ciphertext[2]]) as usize;
 
@@ -274,7 +271,7 @@ impl RLPx {
     pub fn hello_msg(&mut self) -> BytesMut {
         let msg = Hello {
             protocol_version: PROTOCOL_VERSION,
-            client_version: "Hello".to_string(),
+            client_version: "reth_hello".to_string(),
             capabilities: vec![Capability {
                 version: 68,
                 name: "eth".to_string(),
@@ -308,10 +305,6 @@ impl RLPx {
         }
         return match self.frame_state {
             FrameState::DecodingFrame(frame_ciphertext_size) => {
-                debug!("Frame lenght is: {:?} ", src.len() );
-                debug!("frame_ciphertext_size is: {:?} ", frame_ciphertext_size );
-                debug!("frame is: {:?} ", src.as_ref() );
-
 
                 if src.len() >= frame_ciphertext_size {
 
@@ -398,9 +391,6 @@ impl Decoder for RLPx {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        debug!("We're decoding... Size of message is {:?}",src.len());
-        debug!("Msg data is {:?}",src.as_ref());
-
         // See example here:
         // https://docs.rs/tokio-util/latest/tokio_util/codec/index.html
         //   It seems we need to validate full frame and clear only the frame
@@ -436,7 +426,6 @@ impl Decoder for RLPx {
                 return match self.decode_frame(src) {
                     Ok(Some(RLPx_Message::Hello)) =>  {
                         self.rlpx_state = RlpxState::Active;
-                        debug!("Remaining message in buffer after hello {:?}", src.len());
                         Ok(Some(RLPx_Message::Hello))
                     },
                     Ok(None) => {Ok(None)}

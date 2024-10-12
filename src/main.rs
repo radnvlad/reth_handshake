@@ -171,7 +171,7 @@ async fn handle_session(
         match framed.next().await {
             Some(Ok(message)) => match message {
                 RLPx_Message::Auth | RLPx_Message::AuthAck =>  return Err("Unexpected frame recieved"),
-                RLPx_Message::Hello => {}
+                RLPx_Message::Hello => return Err("Unexpected hello frame recieved"),
                 RLPx_Message::Ping => {}
                 RLPx_Message::Pong => {}
                 RLPx_Message::Disconnect(Reason) => {}
