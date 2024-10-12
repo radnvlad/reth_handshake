@@ -1,3 +1,4 @@
+use std::io::{ErrorKind, Error};
 use crate::{
     ecies::{ECIESDirection, HandshakeSecrets, ECIES},
     messages::{Capability, Disconnect, Hello, Ping, Pong, RLPx_Message, Status},
@@ -51,23 +52,6 @@ impl RLPx {
             public_key: public_key,
             secrets: None,
         }
-    }
-
-    pub fn hash_digest(mac: &H256) -> H128 {
-        let mut hasher: Keccak256 = Keccak256::new();
-        hasher.update(mac);
-
-        H128::from_slice(&hasher.finalize()[0..16])
-    }
-
-    pub fn aes_encrypt(aes_key: &H256, data: &mut [u8]) {
-        let cipher = aes::Aes256::new(aes_key.as_ref().into());
-        cipher.encrypt_block(GenericArray::from_mut_slice(data));
-    }
-
-    pub fn aes_decrypt(aes_key: &H256, data: &mut [u8]) {
-        let cipher = aes::Aes256::new(aes_key.as_ref().into());
-        cipher.decrypt_block(GenericArray::from_mut_slice(data));
     }
 
     fn write_frame(&mut self, data: &[u8]) -> BytesMut {
@@ -210,7 +194,9 @@ impl RLPx {
         // debug!("header_mac:  {:?}", header_mac);
 
         if header_mac_computed != header_mac {
+            debug!("RX Header MAC mismatch!");
             return Err("Header MAC mismatch!");
+
         }
         secrets
             .aes_keystream_ingress
@@ -243,6 +229,8 @@ impl RLPx {
         let frame_mac_computed = &secrets.ingress_mac.clone().finalize()[..16];
 
         if frame_mac_computed != frame_mac {
+
+            debug!("RX Frame MAC mismatch!");
             return Err("Frame MAC mismatch!");
         }
 
@@ -366,6 +354,16 @@ impl Decoder for RLPx {
                 return Ok(Some(RLPx_Message::AuthAck));
             }
             RlpxState::AuthAckRecieved => {
+                debug!("We're decoding a Hello frame... ");
+
+                let decrypted_frame = self.decode_frame(src);
+
+                let message_id =  self.decode_frame_data(decrypted_frame.unwrap()).unwrap();
+                self.rlpx_state = RlpxState::Active;
+                
+                return Ok(Some(message_id));
+            }
+            RlpxState::Active => {
                 debug!("We're decoding a frame... ");
 
                 let decrypted_frame = self.decode_frame(src);
@@ -376,8 +374,7 @@ impl Decoder for RLPx {
             }
             _ => {
                 debug!("Invalid frame!! ");
-                panic!();
-                return Ok(None);
+                return Err(Error::from(ErrorKind::Other));
             }
         }
     }

@@ -4,6 +4,7 @@ use futures::SinkExt;
 use futures::StreamExt;
 use log::{debug, error, info};
 use messages::RLPx_Message;
+use rplx::RlpxState;
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use std::process;
 use std::{
@@ -93,8 +94,12 @@ async fn multi_connection_runner(peers: Vec<(PublicKey, SocketAddr)>) {
     // let mut futures_list: Vec<impt> = Vec::new();
     for (public_key, ip_address) in peers {
         info!("Peer public key is {:?}", public_key);
-        let _ = handle_session(private_key, public_key, ip_address).await;
+        match handle_session(private_key, public_key, ip_address).await {
+            Ok(())=> info!("Session cleanly terminated"),
+            Err(err) => info!("Session error! {:?}", err) };
     }
+
+    process::exit(0);
 }
 
 enum SessionState {
@@ -127,7 +132,7 @@ async fn handle_session(
         }
     };
 
-    let mut rplx_tp = RLPx::new(private_key, peer_public_key);
+    let rplx_tp = RLPx::new(private_key, peer_public_key);
 
     let mut framed: Framed<TcpStream, RLPx> = Framed::new(stream, rplx_tp);
 
@@ -135,15 +140,37 @@ async fn handle_session(
     framed
         .send(RLPx_Message::Auth)
         .await
-        .map_err(|_| "Frame send Error ")?;
+        .map_err(|_| "Auth frame send Error ")?;
 
     debug!("We're recieving ack!");
+    match framed.next().await {
+        Some(Ok(RLPx_Message::AuthAck)) => {}
+        Some(Ok(_)) => return Err("Unexpected frame recieved"),
+        Some(Err(_)) => return Err("Codec Error"), 
+        None => return Err("Peer closed socket connection"),
+    }
 
+    debug!("We're sending Hello!");
+    framed
+        .send(RLPx_Message::Hello)
+        .await
+        .map_err(|_| "Frame send Error ")?;
+
+    debug!("We're waiting Hello!");
+    match framed.next().await {
+        Some(Ok(RLPx_Message::Hello)) => {}
+        Some(Ok(_)) => return Err("Unexpected frame recieved during Hello exchange"),
+        Some(Err(_)) => return Err("Codec Error during Hello exchange"), 
+        None => return Err("Peer closed socket connection"),
+    }
+
+    if framed.codec().get_state() != RlpxState::Active {return Err("Unexpected RLPx decoder state after handshake ")}
+
+    info!("We've recieved Hello! Handshake (kinda') established. ");
     loop {
         match framed.next().await {
             Some(Ok(message)) => match message {
-                RLPx_Message::Auth =>  {}
-                RLPx_Message::AuthAck => {}
+                RLPx_Message::Auth | RLPx_Message::AuthAck =>  return Err("Unexpected frame recieved"),
                 RLPx_Message::Hello => {}
                 RLPx_Message::Ping => {}
                 RLPx_Message::Pong => {}
@@ -152,29 +179,11 @@ async fn handle_session(
             }
                 
             Some(Err(_)) => {
-                return Err("Codec Error");} 
+                return Err("Codec Error");
+            } 
             None => return Err("Peer closed socket connection"),
         }
     }  
 
-    //     match result {
-    //         Some(Ok(RLPx_Message::AuthAck)) => {
-    //                 debug!("We got back ack! ");break;}
-    //         None => {    debug!("We got back None! ");process::exit(1);}
-    //         _ => process::exit(1),
-    //     }
-    // }
-
-    debug!("We're sending Hello!");
-    let x = framed
-        .send(RLPx_Message::Hello)
-        .await
-        .map_err(|_| "Frame send Error ")?;
-
-    debug!("We're waiting Hello!");
-    framed.next().await;
-
-    info!("We've recieved Hello! Handshake (kinda') established. ");
-    process::exit(0);
 
 }
