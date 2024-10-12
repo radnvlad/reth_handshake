@@ -361,6 +361,7 @@ impl Decoder for RLPx {
                 let message_id =  self.decode_frame_data(decrypted_frame.unwrap()).unwrap();
                 self.rlpx_state = RlpxState::Active;
                 
+                src.clear();
                 return Ok(Some(message_id));
             }
             RlpxState::Active => {
