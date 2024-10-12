@@ -209,7 +209,11 @@ impl RLPx {
 
         debug!("Header data: {:?} ", header_ciphertext);
 
-        let payload_size = u32::from_be_bytes([0, header_ciphertext[0], header_ciphertext[1], header_ciphertext[2]]) as usize;
+        let mut payload_size = u32::from_be_bytes([0, header_ciphertext[0], header_ciphertext[1], header_ciphertext[2]]) as usize;
+
+        if (payload_size % 16) !=0 { 
+            payload_size = ((payload_size / 16) +1)*16;
+        }
         Ok(payload_size)
 
     }
@@ -286,6 +290,52 @@ impl RLPx {
         self.write_frame(&encoded_hello)
     }
 
+    fn decode_frame(&mut self, src: &mut BytesMut) -> Result<Option<RLPx_Message>, std::io::Error> {
+        
+        if self.frame_state == FrameState::DecodingHeader{
+            if src.len() >= FRAME_HEADER_CIPHERTEXT_SIZE+FRAME_MAC_SIZE {
+                let frame_ciphertext_size = self.decode_frame_header(src).map_err(|err|{
+                    error!("Error decoding header: {:?} ", err);
+                    Error::from(ErrorKind::Other)})?;
+
+                self.frame_state = FrameState::DecodingFrame(frame_ciphertext_size);
+                src.advance(FRAME_HEADER_CIPHERTEXT_SIZE+FRAME_MAC_SIZE);
+            }
+            else {
+                // Call us back until we get a full header. 
+                return Ok(None);
+            }
+        }
+        return match self.frame_state {
+            FrameState::DecodingFrame(frame_ciphertext_size) => {
+                debug!("Frame lenght is: {:?} ", src.len() );
+                debug!("frame_ciphertext_size is: {:?} ", frame_ciphertext_size );
+                debug!("frame is: {:?} ", src.as_ref() );
+
+
+                if src.len() >= frame_ciphertext_size {
+
+                    let decrypted_frame = self.decode_frame_ciphertext(&mut src[..frame_ciphertext_size + FRAME_MAC_SIZE]).map_err(|err|{
+                        error!("Error decrypting frame: {:?} ", err);
+                        Error::from(ErrorKind::Other)})?;
+                        
+                    let message_id =  self.decode_frame_data(decrypted_frame).unwrap();
+                    src.advance(frame_ciphertext_size+FRAME_MAC_SIZE);
+                    self.frame_state = FrameState::DecodingHeader;
+
+                    Ok(Some(message_id))
+                }
+                else {
+                    // Call us back until we get a full header. 
+                    Ok(None)
+                }
+
+            },
+            _ => {
+                error!(" Unexpected state! We should not have gotten in this situation! ");
+                Err(Error::from(ErrorKind::Other)) }
+        }
+    }
 
     fn decode_frame_data(&mut self, frame: &[u8]) -> Result<RLPx_Message,  &'static str> {
 
@@ -348,8 +398,8 @@ impl Decoder for RLPx {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        // debug!("We're decoding... Size of message is {:?}",src.len());
-        // debug!("Msg data is {:?}",src.as_ref());
+        debug!("We're decoding... Size of message is {:?}",src.len());
+        debug!("Msg data is {:?}",src.as_ref());
 
         // See example here:
         // https://docs.rs/tokio-util/latest/tokio_util/codec/index.html
@@ -383,64 +433,25 @@ impl Decoder for RLPx {
             RlpxState::AuthAckRecieved => {
                 debug!("We're decoding a Hello frame... ");
 
-                if self.frame_state == FrameState::DecodingHeader{
-                    if src.len() >= FRAME_HEADER_CIPHERTEXT_SIZE+FRAME_MAC_SIZE {
-                        let frame_ciphertext_size = self.decode_frame_header(src).map_err(|err|{
-                            error!("Error decoding header: {:?} ", err);
-                            Error::from(ErrorKind::Other)})?;
-
-                        self.frame_state = FrameState::DecodingFrame(frame_ciphertext_size);
-                        src.advance(FRAME_HEADER_CIPHERTEXT_SIZE+FRAME_MAC_SIZE);
-                    }
-                    else {
-                        // Call us back until we get a full header. 
-                        return Ok(None);
-                    }
-                }
-                return match self.frame_state {
-                    FrameState::DecodingFrame(frame_ciphertext_size) => {
-                        if src.len() >= frame_ciphertext_size {
-
-                            let decrypted_frame = self.decode_frame_ciphertext(src).map_err(|err|{
-                                error!("Error decrypting frame: {:?} ", err);
-                                Error::from(ErrorKind::Other)})?;
-                                
-                            let message_id =  self.decode_frame_data(decrypted_frame).unwrap();
-                            src.advance(frame_ciphertext_size+FRAME_MAC_SIZE);
-                            match message_id {
-                                RLPx_Message::Hello =>  {
-                                    self.rlpx_state = RlpxState::Active;
-                                    Ok(Some(RLPx_Message::Hello))
-                                }
-                                _ => {
-                                    error!(" Unexpected message! We should have gotten a Hello!! ");
-                                    Err(Error::from(ErrorKind::Other))
-                                },
-                            }
-
-                        }
-                        else {
-                            // Call us back until we get a full header. 
-                            Ok(None)
-                        }
-
+                return match self.decode_frame(src) {
+                    Ok(Some(RLPx_Message::Hello)) =>  {
+                        self.rlpx_state = RlpxState::Active;
+                        debug!("Remaining message in buffer after hello {:?}", src.len());
+                        Ok(Some(RLPx_Message::Hello))
                     },
+                    Ok(None) => {Ok(None)}
                     _ => {
-                        error!(" Unexpected state! We should not have gotter in this situation! ");
-                        Err(Error::from(ErrorKind::Other)) }
-                };
+                        error!(" Unexpected message! We should have gotten a Hello!! ");
+                        Err(Error::from(ErrorKind::Other))
+                    },
+                }
             
             }
             RlpxState::Active => {
                 debug!("We're decoding a protocol frame... ");
 
-                todo!();
+                return self.decode_frame(src)
 
-                // let decrypted_frame = self.decode_frame(src);
-
-                // let message_id =  self.decode_frame_data(decrypted_frame.unwrap()).unwrap();
-                
-                // return Ok(Some(message_id));
             }
             _ => {
                 debug!("Invalid frame!! ");
